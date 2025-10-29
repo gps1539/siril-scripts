@@ -1,11 +1,19 @@
 """
 **Preprocessing script using sirilpy**
 
-This script executes siril commands to calibrate, register and stack subs. It accepts argruments to define working directory, filters, feathering and drizzing setting. It can run headlessly i.e. without the siril UI open, so it can run on a server or cloud instance.
+This script executes siril commands to calibrate, background extract(optional), platesolve(optional), register and stack subs. It accepts argruments to define working directory, filters, feathering and drizzing setting. It can run headlessly i.e. without the siril UI open, so it can run on a server or cloud instance.
 
-Currently the script can no be started directly from siril-cli, but it can be started from a ssf script using the 'pyscript' command i.e. pyscript GPS_Preprocess.py. Such a ssf script can run the script several times (for different settings) with unique saved result files based on setting values.
+With the platesolving option the script can register mosaics.
 
-Note. The script skips restacking master biases, flats and darks, plus background exaction and platesolving if they exist. 
+Currently the script can no be started directly from siril-cli, but it can be started from a ssf script using the 'pyscript' command i.e. pyscript GPS_Preprocess.py. Such a ssf script can run the this script several times i.e. to try different settings, with unique result files based on setting values. 
+
+The script also skips restacking master biases, flats, darks, background exaction and platesolving if they exist. 
+
+Example ssf script to run this script
+---
+requires 1.3.6
+pyscript GPS_Preprocess.py -d <your-workspace-directory-path> -b 95% -r 85% -w 85% -z 1 -ps -bg
+---
 
 Preprocessing for Siril
 from Graham Smith (2025)
