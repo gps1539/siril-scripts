@@ -1,0 +1,2 @@
+requires 1.3.6
+pyscript GPS_Preprocess.py -d /home/grahams/astro/workspace -b 95% -r 85% -w 85% -z 1 -ps -bg
