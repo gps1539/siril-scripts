@@ -1,7 +1,7 @@
 """
 **Preprocessing script using sirilpy**
 
-This script executes siril commands to calibrate, background extract(optional), platesolve(optional), register and stack subs. It accepts argruments to define working directory, filters, feathering and drizzing setting. It can run headlessly i.e. without the siril UI open, so it can run on a server or cloud instance.
+This script executes siril commands to calibrate, background extract(optional), platesolve(optional), register and stack subs. It accepts arguments to define working directory, filters, feathering and drizzling setting. It can run headlessly i.e. without the siril UI open, so it can run on a server or cloud instance.
 
 With the platesolving option the script can register mosaics.
 
@@ -115,7 +115,7 @@ def register(process_dir):
 	if args.platesolve:
 		siril.cmd("seqapplyreg " + light_seq + " -framing=max -filter-bkg=" + bkg + " -filter-round=" + roundf + " -filter-wfwhm=" + wfwhm + " -kernel=square -drizzle -scale=" + drizzle_scale + " -pixfrac=" + pix_frac + " -flat=pp_flat_stacked")
 	else :
-		siril.cmd("register bkg_pp_light -2pass")
+		siril.cmd("register " + light_seq + " -2pass")
 		siril.cmd("seqapplyreg " + light_seq + " -filter-bkg=" + bkg + " -filter-round=" + roundf + " -filter-wfwhm=" + wfwhm + " -kernel=square -drizzle -scale=" + drizzle_scale + " -pixfrac=" + pix_frac + " -flat=pp_flat_stacked")
 
 def stack(process_dir):
