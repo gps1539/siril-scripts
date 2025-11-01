@@ -29,20 +29,19 @@ import argparse
 
 # command line options and help
 parser = argparse.ArgumentParser()
-parser.add_argument("-b","--background", nargs='+', help="background filter settings, XX% or Xk")
+parser.add_argument("-b","--background", nargs='+', help="background filter settings, XX%% or X")
 parser.add_argument("-bg","--bkg", help="extract background" ,action="store_true")
 parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
 parser.add_argument("-f","--feather", nargs='+', help="set feathering amount in px")
 parser.add_argument("-ps","--platesolve", help="platesolve" ,action="store_true")
-parser.add_argument("-r","--round", nargs='+', help="round filter settings, XX% or Xk")
-parser.add_argument("-w","--wfwhm", nargs='+', help="wfwhm filter settings, XX% or Xk")
+parser.add_argument("-r","--round", nargs='+', help="round filter settings, XX%% or X")
+parser.add_argument("-w","--wfwhm", nargs='+', help="wfwhm filter settings, XX%% or X")
 parser.add_argument("-z","--drizzle", nargs='+', help="sets drizzle scaling, default =1X")
 args = parser.parse_args()
 
 siril = s.SirilInterface()
 
-VERSION = "0.0.5"
-
+VERSION = "0.0.6"
 
 # ==============================================================================
 # Prototype sirilpy preprocessing script
@@ -124,9 +123,9 @@ def stack(process_dir):
 	siril.cmd("close")
     
 # ==============================================================================
-bkg = (args.background[0]) if args.background else '3k'
-roundf = (args.round[0]) if args.round else '3k'
-wfwhm = (args.wfwhm[0]) if args.wfwhm else '3k'
+bkg = (args.background[0]) if args.background else '100%'
+roundf = (args.round[0]) if args.round else '100%'
+wfwhm = (args.wfwhm[0]) if args.wfwhm else '100%'
 drizzle_scale = args.drizzle[0] if args.drizzle else '1'
 pix_frac = str(1 / float(drizzle_scale))
 feather = args.feather[0] if args.feather else '0'
@@ -135,7 +134,7 @@ try:
 	siril.connect()
 	siril.cmd("requires", "1.3.6")	
 	siril.log("Running preprocessing")
-	workdir = args.workdir[0]
+	workdir = args.workdir[0] if args.workdir else os.getcwd()
 	siril.cmd("cd", workdir)
 	process_dir = '../process'
 	siril.cmd("set32bits")
@@ -152,6 +151,7 @@ try:
 	if args.platesolve: platesolve(workdir+ '/process')
 	register(workdir+ '/process')
 	stack(workdir+ '/process')
+	siril.cmd("cd", workdir)
 except Exception as e :
 	print("\n**** ERROR *** " +  str(e) + "\n" )
 
