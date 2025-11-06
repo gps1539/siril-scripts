@@ -33,16 +33,20 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-b","--bkg", nargs='+', help="siril background extraction, provide smoothing 0.0-1.0")
 parser.add_argument("-bg","--bkgGraX", nargs='+', help="siril background extraction, provide smoothing 0.0-1.0")
 parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
-parser.add_argument("-dc","--denoiseCC", nargs='+', help="run CC denoise, provide denoise strength 0.0-1.0")
+parser.add_argument("-dc","--denoiseCC", nargs='+', help="run CC denoise, provide mode (luminance,full,separate) and denoise strength 0.0-1.0")
 parser.add_argument("-dg","--denoiseGraX", nargs='+', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
 parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
-parser.add_argument("-sc","--sharpenCC", nargs='+', help="run CC sharpen, provide stellar_amount, non_stellar_amount and non_stellar_strength")
+parser.add_argument("-sc","--sharpenCC", nargs='+', help="run CC sharpen, provide mode, stellar_amount and/or non_stellar_amount and non_stellar_strength")
 parser.add_argument("-sg","--sharpenGraX", nargs='+', help="sharpen (deconvolution) using GraXpert-AI, provide strength 0.0-1.0")
 args = parser.parse_args()
 
+if not any(vars(args).values()):  # Check if all arguments are None
+	print("This script is designed to run from the command line via pyscript and it requires at least one argument")
+	sys.exit(1)
+
 siril = s.SirilInterface()
 
-VERSION = "0.0.5"
+VERSION = "0.0.7"
 
 
 # ==============================================================================
@@ -69,8 +73,9 @@ def bkg_GraX(workdir):
 
 def denoise_CC(workdir):
 # find CosmicClaritySuitepath paths
-	if os.path.isfile (os.path.join((os.path.expanduser("~")), '.config', 'siril', 'sirilcc_denoise.conf')):
-		config_file_path = os.path.join((os.path.expanduser("~")), '.config', 'siril', 'sirilcc_denoise.conf')
+	config_dir = siril.get_siril_configdir()
+	if os.path.isfile (f"{config_dir}/sirilcc_denoise.conf"):
+		config_file_path = (f"{config_dir}/sirilcc_denoise.conf")
 		with open(config_file_path, 'r') as file:
 			executable_path = file.readline().strip()
 			cc_input_dir = (executable_path.rsplit('/', 1)[0])+"/input"
@@ -79,12 +84,16 @@ def denoise_CC(workdir):
 		print("Executable not yet configured. It is recommended to use Seti Astro Cosmic Clarity v5.4 or higher.")
 		sys.exit(1)
 
+	os.chdir(cc_input_dir)
+	for image in os.listdir():
+		os.remove(image)
 	os.chdir(workdir)
+
 	for image in os.listdir():
 		if image.endswith(".fits") or image.endswith(".fit"):
 			siril.log(image)
 			shutil.copy(image, cc_input_dir)			
-			cmd = f"{executable_path} --denoise_strength {denoiseCC_strength} --denoise_mode full"
+			cmd = f"{executable_path} --denoise_mode {denoiseCC_mode} --denoise_strength {denoiseCC_strength} --separate_channels"
 			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, universal_newlines=True)
 
 			percent_re = re.compile(r"(\d+\.?\d*)%")
@@ -97,7 +106,7 @@ def denoise_CC(workdir):
 					if m:
 						try:
 							pct = float(m.group(1))
-							siril.update_progress(f"Denoise: {pct:.2f}%", pct / 100.0)
+							siril.update_progress(f"Denoise:", pct / 100.0)
 						except ValueError:
 							siril.log(line)
 					else:
@@ -133,8 +142,9 @@ def sharpen(workdir):
 
 def sharpen_CC(workdir):
 # find CosmicClaritySuitepath paths
-	if os.path.isfile (os.path.join((os.path.expanduser("~")), '.config', 'siril', 'sirilcc_sharpen.conf')):
-		config_file_path = os.path.join((os.path.expanduser("~")), '.config', 'siril', 'sirilcc_sharpen.conf')
+	config_dir = siril.get_siril_configdir()
+	if os.path.isfile (f"{config_dir}/sirilcc_sharpen.conf"):
+		config_file_path = (f"{config_dir}/sirilcc_sharpen.conf")
 		with open(config_file_path, 'r') as file:
 			executable_path = file.readline().strip()
 			cc_input_dir = (executable_path.rsplit('/', 1)[0])+"/input"
@@ -142,14 +152,17 @@ def sharpen_CC(workdir):
 	else:
 		print("Executable not yet configured. It is recommended to use Seti Astro Cosmic Clarity v5.4 or higher.")
 		sys.exit(1)
-		
-	os.chdir(workdir)
+
+	os.chdir(cc_input_dir)
+	for image in os.listdir():
+		os.remove(image)
+	os.chdir(workdir)		
+
 	for image in os.listdir():
 		if image.endswith(".fits") or image.endswith(".fit"):
 			shutil.copy(image, cc_input_dir)
 
-			cmd = f"{executable_path} --nonstellar_strength {sharpenCC_non_stellar_strength} --stellar_amount {sharpenCC_stellar} --nonstellar_amount  {sharpenCC_non_stellar} --auto_detect_psf --sharpening_mode Both"
-
+			cmd = f"{executable_path} --sharpening_mode '{sharpenCC_mode}' --nonstellar_strength {sharpenCC_non_stellar_strength} --stellar_amount {sharpenCC_stellar_amount} --nonstellar_amount  {sharpenCC_non_stellar_amount} --auto_detect_psf --sharpen_channels_separately"		
 			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, universal_newlines=True)
 
 			percent_re = re.compile(r"(\d+\.?\d*)%")
@@ -212,14 +225,9 @@ if args.sharpen:
 	sharpen(workdir)
 
 if args.denoiseCC:
-	denoiseCC_strength = (args.denoiseCC[0])
+	denoiseCC_mode = (args.denoiseCC[0])
+	denoiseCC_strength = (args.denoiseCC[1])
 	denoise_CC(workdir)
-	
-if args.sharpenCC:
-	sharpenCC_stellar = (args.sharpenCC[0])
-	sharpenCC_non_stellar = (args.sharpenCC[1])	
-	sharpenCC_non_stellar_strength = (args.sharpenCC[2])
-	sharpen_CC(workdir)
 	
 if args.denoiseGraX:
 	denoiseGraX = (args.denoiseGraX[0])
@@ -228,3 +236,10 @@ if args.denoiseGraX:
 if args.sharpenGraX:
 	sharpenGraX = (args.sharpenGraX[0])
 	sharpen_GraX(workdir)
+	
+if args.sharpenCC:
+	sharpenCC_mode = (args.sharpenCC[0])
+	sharpenCC_stellar_amount = (args.sharpenCC[1])
+	sharpenCC_non_stellar_amount = (args.sharpenCC[2])	
+	sharpenCC_non_stellar_strength = (args.sharpenCC[3])
+	sharpen_CC(workdir)
