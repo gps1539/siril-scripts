@@ -5,7 +5,7 @@ This script executes siril commands to calibrate, background extract(optional), 
 
 With the platesolving option the script can register mosaics.
 
-The script can be started directly from the siril command line and can also be started from a ssf script using the 'pyscript' command i.e. pyscript GPS_Preprocess.py. Such a ssf script can run the this script several times i.e. to try different settings, with unique result files based on setting values. 
+The script can be started directly from the siril GUI, siril command line and can also be started from a ssf script using the 'pyscript' command i.e. pyscript GPS_Preprocess.py. Such a ssf script can run the this script several times i.e. to try different settings, with unique result files based on setting values. 
 
 The script also skips restacking master biases, flats, darks, background exaction and platesolving if they already exist. 
 
@@ -28,29 +28,23 @@ import sirilpy as s
 import argparse
 import re
 
-# command line options and help
-parser = argparse.ArgumentParser()
-parser.add_argument("-b","--background", nargs='+', help="background filter settings, XX%% or X")
-parser.add_argument("-bg","--bkg", help="extract background" ,action="store_true")
-parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
-parser.add_argument("-f","--feather", nargs='+', help="set feathering amount in px")
-parser.add_argument("-nc","--no_calibration", help="do not calibrate" ,action="store_true")
-parser.add_argument("-ps","--platesolve", help="platesolve" ,action="store_true")
-parser.add_argument("-r","--round", nargs='+', help="round filter settings, XX%% or X")
-parser.add_argument("-w","--wfwhm", nargs='+', help="wfwhm filter settings, XX%% or X")
-parser.add_argument("-z","--drizzle", nargs='+', help="sets drizzle scaling, default =1X")
-args = parser.parse_args()
+# PyQt6 for GUI
+try:
+    from PyQt6.QtWidgets import (
+        QApplication, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox,
+        QVBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox
+    )
+except ImportError:
+    # Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
+    pass
 
-siril = s.SirilInterface()
-
-VERSION = "0.0.8"
 
 # ==============================================================================
 # Prototype sirilpy preprocessing script
 # ==============================================================================
 
 def master_bias(bias_dir, process_dir):
-	if os.path.exists ((workdir) + '/process/bias_stacked.fit'):
+	if os.path.exists (os.path.join(workdir, 'process/bias_stacked.fit')):
 		print('master bias exists, skipping')
 		return		
 	else:
@@ -60,7 +54,7 @@ def master_bias(bias_dir, process_dir):
 		siril.cmd(f"stack bias rej 3 3 -nonorm")
     
 def master_flat(flat_dir, process_dir):
-	if os.path.exists ((workdir) + '/process/pp_flat_stacked.fit'):
+	if os.path.exists (os.path.join(workdir, 'process/pp_flat_stacked.fit')):
 		print('master flat exists, skipping')
 		return		
 	else:
@@ -71,7 +65,7 @@ def master_flat(flat_dir, process_dir):
 		siril.cmd("stack pp_flat rej 3 3 -norm=mul")
     
 def master_dark(dark_dir, process_dir):
-	if os.path.exists ((workdir) + '/process/dark_stacked.fit'):
+	if os.path.exists (os.path.join(workdir, 'process/dark_stacked.fit')):
 		print('master dark exists, skipping')
 		return		
 	else:
@@ -81,7 +75,7 @@ def master_dark(dark_dir, process_dir):
 		siril.cmd(f"stack dark rej 3 3 -nonorm")
     
 def light(light_dir, process_dir):
-	if os.path.exists ((workdir) + '/process/pp_light_.seq'):
+	if os.path.exists (os.path.join(workdir, 'process/pp_light_.seq')):
 		print('pp_light exists, skipping')
 		return		
 	else:
@@ -91,7 +85,7 @@ def light(light_dir, process_dir):
 		siril.cmd(f"calibrate light -dark=dark_stacked -flat=pp_flat_stacked -cc=dark -cfa -equalize_cfa")
 
 def light_nc(light_dir, process_dir):
-	if os.path.exists ((workdir) + '/process/pp_light_.seq'):
+	if os.path.exists (os.path.join(workdir, 'process/pp_light_.seq')):
 		print('pp_light exists, skipping')
 		return		
 	else:
@@ -99,7 +93,7 @@ def light_nc(light_dir, process_dir):
 		siril.cmd(f"convert pp_light -out={process_dir}")
 		
 def bkg_extract(process_dir):
-	if os.path.exists ((workdir) + '/process/bkg_pp_light_.seq'):
+	if os.path.exists (os.path.join(workdir, 'process/bkg_pp_light_.seq')):
 		print('background extracted, skipping')
 		return		
 	else:
@@ -108,11 +102,11 @@ def bkg_extract(process_dir):
 	
 def platesolve(process_dir):
 	if args.bkg:
-		if os.path.exists ((workdir) + '/process/r_bkg_pp_light_.seq'):
+		if os.path.exists (os.path.join(workdir, 'process/r_bkg_pp_light_.seq')):
 			print('sequence platesolved, skipping')
 			return			
 	else:
-		if os.path.exists ((workdir) + '/process/r_pp_light_.seq'):
+		if os.path.exists (os.path.join(workdir, 'process/r_pp_light_.seq')):
 			print('sequence platesolved, skipping')
 			return		
 	siril.cmd("cd " + process_dir)
@@ -133,41 +127,171 @@ def stack(process_dir):
 	obj=(siril.get_image_fits_header(return_as='dict')['OBJECT']).replace(" ", "")
 	siril.cmd(f"stack r_{light_seq} rej 3 3 -norm=addscale -output_norm -rgb_equal -maximize -filter-included -weight=wfwhm  -feather={feather} -out=../{obj}_b{bkg}-r{roundf}-w{wfwhm}-z{drizzle_scale}-f{feather}")
 	siril.cmd("close")
-    
+
 # ==============================================================================
-bkg = (args.background[0]) if args.background else '100%'
-roundf = (args.round[0]) if args.round else '100%'
-wfwhm = (args.wfwhm[0]) if args.wfwhm else '100%'
-drizzle_scale = args.drizzle[0] if args.drizzle else '1'
-pix_frac = str(1 / float(drizzle_scale))
-feather = args.feather[0] if args.feather else '0'
-# ==============================================================================	
-try:
-	siril.connect()
-	siril.cmd("requires", "1.3.6")	
-	siril.log("Running preprocessing")
-	workdir = args.workdir[0] if args.workdir else os.getcwd()
-	siril.cmd("cd", workdir)
-	process_dir = '../process'
-	siril.cmd("set32bits")
-	siril.cmd("setext fit")
-	if args.no_calibration:
-		light_nc(workdir+ '/lights',process_dir)
-	else:
-		master_bias(workdir+ '/biases' ,process_dir)
-		master_flat(workdir+ '/flats'  ,process_dir)
-		master_dark(workdir+ '/darks'  ,process_dir)
-		light(workdir+ '/lights' ,process_dir)
-	if args.bkg: 
-		bkg_extract(workdir+ '/process')
-		light_seq = 'bkg_pp_light'
-	else:
-		light_seq = 'pp_light'
-	if args.platesolve: platesolve(workdir+ '/process')
-	register(workdir+ '/process')
-	stack(workdir+ '/process')
-	siril.cmd("cd", workdir)
-except Exception as e :
-	print("\n**** ERROR *** " +  str(e) + "\n" )
+# GUI Mode
+# ==============================================================================
 
+def run_gui():
+    if 'QApplication' not in globals():
+        print("PyQt6 is not installed. Please install it to use the GUI.")
+        print("pip install PyQt6")
+        return
 
+    class PreprocessingDialog(QDialog):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle("Siril Pre-processing")
+            self.setFixedWidth(int(self.width() * 1.20))
+            
+            layout = QVBoxLayout(self)
+            form_layout = QFormLayout()
+
+            self.workdir_input = QLineEdit(os.getcwd())
+            form_layout.addRow("Working Directory:", self.workdir_input)
+
+            self.background_input = QLineEdit("100%")
+            form_layout.addRow("Background filter (XX% or X):", self.background_input)
+
+            self.round_input = QLineEdit("100%")
+            form_layout.addRow("Round filter (XX% or X):", self.round_input)
+
+            self.wfwhm_input = QLineEdit("100%")
+            form_layout.addRow("wFWHM filter (XX% or X):", self.wfwhm_input)
+            
+            self.feather_input = QLineEdit("0")
+            form_layout.addRow("Feathering (px):", self.feather_input)
+
+            self.drizzle_input = QLineEdit("1")
+            form_layout.addRow("Drizzle scaling (e.g., 1, 2):", self.drizzle_input)
+
+            self.bkg_extract_cb = QCheckBox("Extract Background")
+            form_layout.addRow(self.bkg_extract_cb)
+
+            self.no_calibration_cb = QCheckBox("No Calibration")
+            form_layout.addRow(self.no_calibration_cb)
+
+            self.platesolve_cb = QCheckBox("Platesolve")
+            form_layout.addRow(self.platesolve_cb)
+
+            layout.addLayout(form_layout)
+
+            self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            self.button_box.accepted.connect(self.accept)
+            self.button_box.rejected.connect(self.reject)
+            layout.addWidget(self.button_box)
+
+        def get_values(self):
+            return {
+                "workdir": self.workdir_input.text(),
+                "background": self.background_input.text(),
+                "round": self.round_input.text(),
+                "wfwhm": self.wfwhm_input.text(),
+                "feather": self.feather_input.text(),
+                "drizzle": self.drizzle_input.text(),
+                "bkg_extract": self.bkg_extract_cb.isChecked(),
+                "no_calibration": self.no_calibration_cb.isChecked(),
+                "platesolve": self.platesolve_cb.isChecked(),
+            }
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    dialog = PreprocessingDialog()
+    if dialog.exec():
+        values = dialog.get_values()
+        
+        cli_args = []
+        if values["workdir"]:
+            cli_args.extend(["-d", values["workdir"]])
+        if values["background"]:
+            cli_args.extend(["-b", values["background"]])
+        if values["round"]:
+            cli_args.extend(["-r", values["round"]])
+        if values["wfwhm"]:
+            cli_args.extend(["-w", values["wfwhm"]])
+        if values["feather"]:
+            cli_args.extend(["-f", values["feather"]])
+        if values["drizzle"]:
+            cli_args.extend(["-z", values["drizzle"]])
+        if values["bkg_extract"]:
+            cli_args.append("-bg")
+        if values["no_calibration"]:
+            cli_args.append("-nc")
+        if values["platesolve"]:
+            cli_args.append("-ps")
+
+        main_logic(cli_args)
+
+        msg_box = QMessageBox()
+        msg_box.setIcon(QMessageBox.Icon.Information)
+        msg_box.setText("Processing finished.")
+        msg_box.setWindowTitle("Success")
+        msg_box.exec()
+
+def main_logic(argv):
+    global args, workdir, bkg, roundf, wfwhm, drizzle_scale, pix_frac, feather, light_seq
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-b","--background", nargs='+', help="background filter settings, XX%% or X")
+    parser.add_argument("-bg","--bkg", help="extract background" ,action="store_true")
+    parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
+    parser.add_argument("-f","--feather", nargs='+', help="set feathering amount in px")
+    parser.add_argument("-nc","--no_calibration", help="do not calibrate" ,action="store_true")
+    parser.add_argument("-ps","--platesolve", help="platesolve" ,action="store_true")
+    parser.add_argument("-r","--round", nargs='+', help="round filter settings, XX%% or X")
+    parser.add_argument("-w","--wfwhm", nargs='+', help="wfwhm filter settings, XX%% or X")
+    parser.add_argument("-z","--drizzle", nargs='+', help="sets drizzle scaling, default =1X")
+    args = parser.parse_args(argv)
+
+    bkg = (args.background[0]) if args.background else '100%'
+    roundf = (args.round[0]) if args.round else '100%'
+    wfwhm = (args.wfwhm[0]) if args.wfwhm else '100%'
+    drizzle_scale = args.drizzle[0] if args.drizzle else '1'
+    pix_frac = str(1 / float(drizzle_scale))
+    feather = args.feather[0] if args.feather else '0'
+    
+    try:
+        siril.connect()
+        siril.cmd("requires", "1.3.6")	
+        siril.log("Running preprocessing")
+        workdir = args.workdir[0] if args.workdir else os.getcwd()
+        siril.cmd("cd", workdir)
+        process_dir = os.path.join(workdir, 'process')
+        if not os.path.exists(process_dir):
+            os.makedirs(process_dir)
+            
+        siril.cmd("set32bits")
+        siril.cmd("setext", "fit")
+        if args.no_calibration:
+            light_nc(os.path.join(workdir, 'lights'), process_dir)
+        else:
+            master_bias(os.path.join(workdir, 'biases'), process_dir)
+            master_flat(os.path.join(workdir, 'flats'), process_dir)
+            master_dark(os.path.join(workdir, 'darks'), process_dir)
+            light(os.path.join(workdir, 'lights'), process_dir)
+        if args.bkg: 
+            bkg_extract(process_dir)
+            light_seq = 'bkg_pp_light'
+        else:
+            light_seq = 'pp_light'
+        if args.platesolve: platesolve(process_dir)
+        register(process_dir)
+        stack(process_dir)
+        siril.cmd("cd", workdir)
+    except Exception as e :
+        print("\n**** ERROR *** " +  str(e) + "\n" )
+        if 'QApplication' in globals() and QApplication.instance():
+             msg_box = QMessageBox()
+             msg_box.setIcon(QMessageBox.Icon.Critical)
+             msg_box.setText("An error occurred during processing.")
+             msg_box.setInformativeText(str(e))
+             msg_box.setWindowTitle("Error")
+             msg_box.exec()
+
+if __name__ == '__main__':
+    siril = s.SirilInterface()
+    VERSION = "0.1.0"
+    
+    if len(sys.argv) == 1:
+        run_gui()
+    else:
+        main_logic(sys.argv[1:])
