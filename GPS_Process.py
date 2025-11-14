@@ -1,7 +1,7 @@
 """
 **Processing script using sirilpy**
 
-This script executes siril commands for background extraction, denoise and/or sharpening. It accepts arguments to define working directory, strenghts, amounts etc. It can run headlessly i.e. without the siril UI open, so it can run on a server or cloud instance.
+This script executes siril commands for background extraction, denoise and/or sharpening. It accepts arguments to define working directory, strengths, amounts etc. It can run headlessly i.e. without the siril UI open, so it can run on a server or cloud instance.
 
 With the CosmicClarity and GraXpert the executables must be installed and configured using their sirilpy scripts 1st.
 
@@ -31,7 +31,7 @@ import re
 # PyQt6 for GUI
 try:
 	from PyQt6.QtWidgets import (
-		QApplication, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox,
+		QApplication, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox,
 		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox
 	)
 except ImportError:
@@ -59,6 +59,15 @@ def bkg_GraX(workdir):
 			siril.log("Starting GraXpert background extraction on " + image)			
 			siril.cmd("load", image)
 			siril.cmd("pyscript GraXpert-AI.py -gpu -bge -smoothing " + bkgGraX)
+			siril.cmd("save", image)
+
+def denoise(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(".fits") or image.endswith(".fit"):
+			siril.log("Starting denoise on " + image)
+			siril.cmd("load", image)
+			siril.cmd("denoise -indep -vst")
 			siril.cmd("save", image)
 
 def denoise_CC(workdir):
@@ -186,9 +195,16 @@ def sharpen_GraX(workdir):
 		if image.endswith(".fits") or image.endswith(".fit"):
 			siril.log("Starting GraXpert sharpen on " + image)
 			siril.cmd("load", image)
-			siril.cmd("pyscript GraXpert-AI.py -gpu -deconv_obj -strength " + sharpenGraX)
-			siril.cmd("pyscript GraXpert-AI.py -gpu -deconv_stellar -strength " + sharpenGraX)
+			if sharpenGraX_mode == "both":
+				siril.cmd("pyscript GraXpert-AI.py -gpu -deconv_obj -strength " + sharpenGraX_strength)
+				siril.cmd("pyscript GraXpert-AI.py -gpu -deconv_stellar -strength " + sharpenGraX_strength)
+			if sharpenGraX_mode == "object":
+				siril.cmd("pyscript GraXpert-AI.py -gpu -deconv_obj -strength " + sharpenGraX_strength)			
+			if sharpenGraX_mode == "stellar":
+				siril.cmd("pyscript GraXpert-AI.py -gpu -deconv_stellar -strength " + sharpenGraX_strength)			
 			siril.cmd("save", image)			
+
+
 def run_gui():
 	if 'QApplication' not in globals():
 		print("PyQt6 is not installed. Please install it to use the GUI.")
@@ -210,16 +226,26 @@ def run_gui():
 			self.bkg_smooth = QLineEdit("0.5")
 			self.bkg_smooth.setEnabled(False)
 			self.bkg_cb.toggled.connect(self.bkg_smooth.setEnabled)
-			form_layout.addRow(self.bkg_cb, self.bkg_smooth)
+			bkg_layout = QHBoxLayout()
+			bkg_layout.addWidget(QLabel("Smoothing:"))
+			bkg_layout.addWidget(self.bkg_smooth)
+			form_layout.addRow(self.bkg_cb, bkg_layout)
 
 			self.bkg_grax_cb = QCheckBox("GraXpert Background Extraction")
 			self.bkg_grax_smooth = QLineEdit("0.5")
 			self.bkg_grax_smooth.setEnabled(False)
 			self.bkg_grax_cb.toggled.connect(self.bkg_grax_smooth.setEnabled)
-			form_layout.addRow(self.bkg_grax_cb, self.bkg_grax_smooth)
+			bkg_grax_layout = QHBoxLayout()
+			bkg_grax_layout.addWidget(QLabel("Smoothing:"))
+			bkg_grax_layout.addWidget(self.bkg_grax_smooth)
+			form_layout.addRow(self.bkg_grax_cb, bkg_grax_layout)
 
+			self.denoise_cb = QCheckBox("Siril Denoise (denoise -indep -vst)")
+			form_layout.addRow(self.denoise_cb)
+			
 			self.denoise_cc_cb = QCheckBox("Cosmic Clarity Denoise")
-			self.denoise_cc_mode = QLineEdit("luminance")
+			self.denoise_cc_mode = QComboBox()
+			self.denoise_cc_mode.addItems(['full', 'luminance', 'separate'])
 			self.denoise_cc_strength = QLineEdit("0.5")
 			self.denoise_cc_mode.setEnabled(False)
 			self.denoise_cc_strength.setEnabled(False)
@@ -236,13 +262,17 @@ def run_gui():
 			self.denoise_grax_strength = QLineEdit("0.5")
 			self.denoise_grax_strength.setEnabled(False)
 			self.denoise_grax_cb.toggled.connect(self.denoise_grax_strength.setEnabled)
-			form_layout.addRow(self.denoise_grax_cb, self.denoise_grax_strength)
+			denoise_grax_layout = QHBoxLayout()
+			denoise_grax_layout.addWidget(QLabel("Strength:"))
+			denoise_grax_layout.addWidget(self.denoise_grax_strength)
+			form_layout.addRow(self.denoise_grax_cb, denoise_grax_layout)
 
 			self.sharpen_cb = QCheckBox("Siril Sharpen (Deconvolution)")
 			form_layout.addRow(self.sharpen_cb)
 
 			self.sharpen_cc_cb = QCheckBox("Cosmic Clarity Sharpen")
-			self.sharpen_cc_mode = QLineEdit("non_stellar")
+			self.sharpen_cc_mode = QComboBox()
+			self.sharpen_cc_mode.addItems(['Both', 'Stellar Only' ,'Non-Stellar Only'])
 			self.sharpen_cc_stellar_amount = QLineEdit("0.5")
 			self.sharpen_cc_non_stellar_amount = QLineEdit("0.5")
 			self.sharpen_cc_non_stellar_strength = QLineEdit("5")
@@ -266,10 +296,19 @@ def run_gui():
 			form_layout.addRow(self.sharpen_cc_cb, sharpen_cc_layout)
 
 			self.sharpen_grax_cb = QCheckBox("GraXpert Sharpen")
+			self.sharpen_grax_mode = QComboBox()
+			self.sharpen_grax_mode.addItems(['both', 'object' ,'stellar'])
 			self.sharpen_grax_strength = QLineEdit("0.5")
+			self.sharpen_grax_mode.setEnabled(False)
 			self.sharpen_grax_strength.setEnabled(False)
+			self.sharpen_grax_cb.toggled.connect(self.sharpen_grax_mode.setEnabled)
 			self.sharpen_grax_cb.toggled.connect(self.sharpen_grax_strength.setEnabled)
-			form_layout.addRow(self.sharpen_grax_cb, self.sharpen_grax_strength)
+			sharpen_grax_layout = QHBoxLayout()
+			sharpen_grax_layout.addWidget(QLabel("Mode:"))
+			sharpen_grax_layout.addWidget(self.sharpen_grax_mode)	
+			sharpen_grax_layout.addWidget(QLabel("Strength:"))
+			sharpen_grax_layout.addWidget(self.sharpen_grax_strength)	
+			form_layout.addRow(self.sharpen_grax_cb, sharpen_grax_layout)
 
 			layout.addLayout(form_layout)
 
@@ -283,11 +322,12 @@ def run_gui():
 				"workdir": self.workdir_input.text(),
 				"bkg": self.bkg_smooth.text() if self.bkg_cb.isChecked() else None,
 				"bkgGraX": self.bkg_grax_smooth.text() if self.bkg_grax_cb.isChecked() else None,
-				"denoiseCC": [self.denoise_cc_mode.text(), self.denoise_cc_strength.text()] if self.denoise_cc_cb.isChecked() else None,
+				"denoise": self.denoise_cb.isChecked(),
+				"denoiseCC": [self.denoise_cc_mode.currentText(), self.denoise_cc_strength.text()] if self.denoise_cc_cb.isChecked() else None,
 				"denoiseGraX": self.denoise_grax_strength.text() if self.denoise_grax_cb.isChecked() else None,
 				"sharpen": self.sharpen_cb.isChecked(),
-				"sharpenCC": [self.sharpen_cc_mode.text(), self.sharpen_cc_stellar_amount.text(), self.sharpen_cc_non_stellar_amount.text(), self.sharpen_cc_non_stellar_strength.text()] if self.sharpen_cc_cb.isChecked() else None,
-				"sharpenGraX": self.sharpen_grax_strength.text() if self.sharpen_grax_cb.isChecked() else None,
+				"sharpenCC": [self.sharpen_cc_mode.currentText(), self.sharpen_cc_stellar_amount.text(), self.sharpen_cc_non_stellar_amount.text(), self.sharpen_cc_non_stellar_strength.text()] if self.sharpen_cc_cb.isChecked() else None,
+				"sharpenGraX": [self.sharpen_grax_mode.currentText(), self.sharpen_grax_strength.text()] if self.sharpen_grax_cb.isChecked() else None,
 			}
 
 	app = QApplication.instance() or QApplication(sys.argv)
@@ -313,7 +353,7 @@ def run_gui():
 			msg_box.exec()
 			return
 
-		global smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, sharpenGraX, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength
+		global smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength
 		
 		if values["bkg"]:
 			smooth = values["bkg"]
@@ -323,8 +363,8 @@ def run_gui():
 			bkgGraX = values["bkgGraX"]
 			bkg_GraX(workdir)
 
-		if values["sharpen"]:
-			sharpen(workdir)
+		if values["denoise"]:
+			denoise(workdir)
 
 		if values["denoiseCC"]:
 			denoiseCC_mode = values["denoiseCC"][0]
@@ -335,8 +375,12 @@ def run_gui():
 			denoiseGraX = values["denoiseGraX"]
 			denoise_GraX(workdir)
 				
+		if values["sharpen"]:
+			sharpen(workdir)
+
 		if values["sharpenGraX"]:
-			sharpenGraX = values["sharpenGraX"]
+			sharpenGraX_mode = values["sharpenGraX"][0]
+			sharpenGraX_strength = values["sharpenGraX"][1]
 			sharpen_GraX(workdir)
 			
 		if values["sharpenCC"]:
@@ -361,14 +405,15 @@ if __name__ == '__main__':
 	parser.add_argument("-b","--bkg", nargs='+', help="siril background extraction, provide smoothing 0.0-1.0")
 	parser.add_argument("-bg","--bkgGraX", nargs='+', help="siril background extraction, provide smoothing 0.0-1.0")
 	parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
-	parser.add_argument("-dc","--denoiseCC", nargs='+', help="run CC denoise, provide mode (luminance,full,separate) and denoise strength 0.0-1.0")
+	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
+	parser.add_argument("-dc","--denoiseCC", nargs='+', help="run CC denoise, provide mode (luminance, full, separate) and denoise strength 0.0-1.0")
 	parser.add_argument("-dg","--denoiseGraX", nargs='+', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
-	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
+	parser.add_argument("-ss","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
 	parser.add_argument("-sc","--sharpenCC", nargs='+', help="run CC sharpen, provide mode, stellar_amount and/or non_stellar_amount and non_stellar_strength")
-	parser.add_argument("-sg","--sharpenGraX", nargs='+', help="sharpen (deconvolution) using GraXpert-AI, provide strength 0.0-1.0")
-
+	parser.add_argument("-sg","--sharpenGraX", nargs='+', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
+	
 	siril = s.SirilInterface()
-	VERSION = "0.1.0"
+	VERSION = "0.1.1"
 
 	if len(sys.argv) == 1:
 		run_gui()
@@ -393,8 +438,8 @@ if __name__ == '__main__':
 			bkgGraX = (args.bkgGraX[0])
 			bkg_GraX(workdir)
 
-		if args.sharpen:
-			sharpen(workdir)
+		if args.denoise:
+			denoise(workdir)
 
 		if args.denoiseCC:
 			denoiseCC_mode = (args.denoiseCC[0])
@@ -404,9 +449,13 @@ if __name__ == '__main__':
 		if args.denoiseGraX:
 			denoiseGraX = (args.denoiseGraX[0])
 			denoise_GraX(workdir)
+
+		if args.sharpen:
+			sharpen(workdir)
 				
 		if args.sharpenGraX:
-			sharpenGraX = (args.sharpenGraX[0])
+			sharpenGraX_mode = (args.sharpenGraX[0])
+			sharpenGraX_strength = (args.sharpenGraX[1])
 			sharpen_GraX(workdir)
 			
 		if args.sharpenCC:
