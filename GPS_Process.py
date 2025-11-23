@@ -18,6 +18,9 @@ Processing for Siril
 from Graham Smith (2025)
 
 SPDX-License-Identifier: GPL-3.0-or-later
+-----
+0.1.0	Initial submittal for merge request
+
 """
 
 import sys
@@ -27,6 +30,8 @@ import shutil
 import sirilpy as s
 import argparse
 import re
+
+VERSION = "0.1.0"
 
 # PyQt6 for GUI
 try:
@@ -58,7 +63,7 @@ def bkg_GraX(workdir):
 		if image.endswith(".fits") or image.endswith(".fit"):
 			siril.log("Starting GraXpert background extraction on " + image)			
 			siril.cmd("load", image)
-			siril.cmd("pyscript GraXpert-AI.py -gpu -bge -smoothing " + bkgGraX)
+			siril.cmd("pyscript GraXpert-AI.py -bge -smoothing " + bkgGraX)
 			siril.cmd("save", image)
 
 def denoise(workdir):
@@ -93,7 +98,7 @@ def denoise_CC(workdir):
 			siril.log(image)
 			shutil.copy(image, cc_input_dir)			
 			cmd = f"{executable_path} --denoise_mode {denoiseCC_mode} --denoise_strength {denoiseCC_strength} --separate_channels"
-			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, universal_newlines=True)
+			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
 
 			percent_re = re.compile(r"(\d+\.?\d*)" + "%")
 			if process.stdout:
@@ -162,7 +167,7 @@ def sharpen_CC(workdir):
 			shutil.copy(image, cc_input_dir)
 
 			cmd = f"{executable_path} --sharpening_mode '{sharpenCC_mode}' --nonstellar_strength {sharpenCC_non_stellar_strength} --stellar_amount {sharpenCC_stellar_amount} --nonstellar_amount  {sharpenCC_non_stellar_amount} --auto_detect_psf --sharpen_channels_separately"		
-			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, universal_newlines=True)
+			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
 
 			percent_re = re.compile(r"(\d+\.?\d*)" + "%")
 			if process.stdout:
@@ -409,11 +414,10 @@ if __name__ == '__main__':
 	parser.add_argument("-dc","--denoiseCC", nargs='+', help="run CC denoise, provide mode (luminance, full, separate) and denoise strength 0.0-1.0")
 	parser.add_argument("-dg","--denoiseGraX", nargs='+', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
 	parser.add_argument("-ss","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
-	parser.add_argument("-sc","--sharpenCC", nargs='+', help="run CC sharpen, provide mode, stellar_amount and/or non_stellar_amount and non_stellar_strength")
+	parser.add_argument("-sc","--sharpenCC", nargs='+', help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
 	
 	siril = s.SirilInterface()
-	VERSION = "0.1.1"
 
 	if len(sys.argv) == 1:
 		run_gui()
