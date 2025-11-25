@@ -19,6 +19,9 @@ Preprocessing for Siril
 from Graham Smith (2025)
 
 SPDX-License-Identifier: GPL-3.0-or-later
+-----
+0.1.0	Initial submittal for merge request
+ 
 """
 
 
@@ -28,6 +31,8 @@ import sirilpy as s
 import argparse
 import re
 
+VERSION = "0.1.0"
+	
 # PyQt6 for GUI
 try:
 	from PyQt6.QtWidgets import (
@@ -138,7 +143,7 @@ def stack(process_dir):
 	siril.cmd("load pp_light_00001.fit")
 	obj = (siril.get_image_fits_header(
 		return_as='dict')['OBJECT']).replace(" ", "")
-	siril.cmd(f"stack r_{light_seq} rej 3 3 -norm=addscale -output_norm -rgb_equal -maximize -filter-included -weight=wfwhm  -feather={feather} -out=../{obj}_b{bkg}-r{roundf}-w{wfwhm}-z{drizzle_scale}-f{feather}")
+	siril.cmd(f"stack r_{light_seq} rej 3 3 -norm=addscale -output_norm -rgb_equal -maximize -filter-included -weight=wfwhm  -feather={feather} -out=../{obj}_b{bkg}-r{roundf}-w{wfwhm}-z{drizzle_scale}-f{feather}-$LIVETIME:%d$s")
 	siril.cmd("close")
 
 # ==============================================================================
@@ -322,7 +327,6 @@ def main_logic(argv):
 
 if __name__ == '__main__':
 	siril = s.SirilInterface()
-	VERSION = "0.1.0"
 
 	if len(sys.argv) == 1:
 		run_gui()
