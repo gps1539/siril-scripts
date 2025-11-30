@@ -165,8 +165,8 @@ def sharpen_CC(workdir):
 	for image in os.listdir():
 		if image.endswith(".fits") or image.endswith(".fit"):
 			shutil.copy(image, cc_input_dir)
-
-			cmd = f"{executable_path} --sharpening_mode '{sharpenCC_mode}' --nonstellar_strength {sharpenCC_non_stellar_strength} --stellar_amount {sharpenCC_stellar_amount} --nonstellar_amount  {sharpenCC_non_stellar_amount} --auto_detect_psf --sharpen_channels_separately"		
+			cmd = f"{executable_path} --sharpening_mode '{sharpenCC_mode}' --nonstellar_strength {sharpenCC_non_stellar_strength} --stellar_amount {sharpenCC_stellar_amount} --nonstellar_amount  {sharpenCC_non_stellar_amount} --auto_detect_psf --sharpen_channels_separately"
+			print(cmd)
 			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
 
 			percent_re = re.compile(r"(\d+\.?\d*)" + "%")
@@ -219,7 +219,7 @@ def run_gui():
 	class ProcessingDialog(QDialog):
 		def __init__(self, parent=None):
 			super().__init__(parent)
-			self.setWindowTitle("Siril GPS_Processing")
+			self.setWindowTitle("Siril GPS_Processing, (all fit(s) files in working directory will be processed)")
 			
 			layout = QVBoxLayout(self)
 			form_layout = QFormLayout()
@@ -289,6 +289,9 @@ def run_gui():
 			self.sharpen_cc_cb.toggled.connect(self.sharpen_cc_stellar_amount.setEnabled)
 			self.sharpen_cc_cb.toggled.connect(self.sharpen_cc_non_stellar_amount.setEnabled)
 			self.sharpen_cc_cb.toggled.connect(self.sharpen_cc_non_stellar_strength.setEnabled)
+			self.sharpen_cc_mode.currentTextChanged.connect(self.update_sharpen_cc_options)
+			self.update_sharpen_cc_options(self.sharpen_cc_mode.currentText())
+
 			sharpen_cc_layout = QHBoxLayout()
 			sharpen_cc_layout.addWidget(QLabel("Mode:"))
 			sharpen_cc_layout.addWidget(self.sharpen_cc_mode)
@@ -321,6 +324,20 @@ def run_gui():
 			self.button_box.accepted.connect(self.accept)
 			self.button_box.rejected.connect(self.reject)
 			layout.addWidget(self.button_box)
+
+		def update_sharpen_cc_options(self, mode):
+			if mode == 'Both':
+				self.sharpen_cc_stellar_amount.setEnabled(True)
+				self.sharpen_cc_non_stellar_amount.setEnabled(True)
+				self.sharpen_cc_non_stellar_strength.setEnabled(True)
+			elif mode == 'Stellar Only':
+				self.sharpen_cc_stellar_amount.setEnabled(True)
+				self.sharpen_cc_non_stellar_amount.setEnabled(False)
+				self.sharpen_cc_non_stellar_strength.setEnabled(False)
+			elif mode == 'Non-Stellar Only':
+				self.sharpen_cc_stellar_amount.setEnabled(False)
+				self.sharpen_cc_non_stellar_amount.setEnabled(True)
+				self.sharpen_cc_non_stellar_strength.setEnabled(True)
 
 		def get_values(self):
 			return {
@@ -390,9 +407,16 @@ def run_gui():
 			
 		if values["sharpenCC"]:
 			sharpenCC_mode = values["sharpenCC"][0]
-			sharpenCC_stellar_amount = values["sharpenCC"][1]
-			sharpenCC_non_stellar_amount = values["sharpenCC"][2]	
-			sharpenCC_non_stellar_strength = values["sharpenCC"][3]
+			sharpenCC_stellar_amount = values["sharpenCC"][1] if values["sharpenCC"][1] else None
+			sharpenCC_non_stellar_amount = values["sharpenCC"][2] if values["sharpenCC"][2] else None
+			sharpenCC_non_stellar_strength = values["sharpenCC"][3] if values["sharpenCC"][3] else None
+
+			if sharpenCC_mode == 'Stellar Only':
+				sharpenCC_non_stellar_amount = 0
+				sharpenCC_non_stellar_strength = 0
+			elif sharpenCC_mode == 'Non-Stellar Only':
+				sharpenCC_stellar_amount = 0
+
 			sharpen_CC(workdir)
 
 		msg_box = QMessageBox()
@@ -464,7 +488,19 @@ if __name__ == '__main__':
 			
 		if args.sharpenCC:
 			sharpenCC_mode = (args.sharpenCC[0])
-			sharpenCC_stellar_amount = (args.sharpenCC[1])
-			sharpenCC_non_stellar_amount = (args.sharpenCC[2])	
-			sharpenCC_non_stellar_strength = (args.sharpenCC[3])
+			if (args.sharpenCC[0]) == 'Both':
+				sharpenCC_stellar_amount = (args.sharpenCC[1])
+				sharpenCC_non_stellar_amount = (args.sharpenCC[2])	
+				sharpenCC_non_stellar_strength = (args.sharpenCC[3])
+			elif (args.sharpenCC[0]) == 'Non-Stellar Only':
+				sharpenCC_non_stellar_amount = (args.sharpenCC[1])	
+				sharpenCC_non_stellar_strength = (args.sharpenCC[2])						
+				sharpenCC_stellar_amount = '0'
+			elif (args.sharpenCC[0]) == 'Stellar Only':
+				sharpenCC_stellar_amount = (args.sharpenCC[1])			
+				sharpenCC_non_stellar_amount = '0'	
+				sharpenCC_non_stellar_strength = '0'		
+			else:
+				print('Mode needs to be either Both, Stellar Only or Non-Stellar Only')
+				sys.exit(1)
 			sharpen_CC(workdir)
