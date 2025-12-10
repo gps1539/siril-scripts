@@ -19,7 +19,7 @@ from Graham Smith (2025)
 
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
-0.1.0	Initial submittal for merge request
+0.1.1	Initial submittal for merge request
 
 """
 
@@ -31,7 +31,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 # PyQt6 for GUI
 try:
@@ -43,6 +43,7 @@ except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
 	pass
 
+new_images = []
 
 # ==============================================================================
 # Prototype sirilpy processing script
@@ -51,20 +52,24 @@ except ImportError:
 def bkg(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit"):
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
 			siril.log("Starting background extraction on " + image)
 			siril.cmd("load", image)
 			siril.cmd("subsky -rbf -samples=20 -tolerance=1.0 -smooth=" + smooth)
-			siril.cmd("save", image)
-
+			newimage = (f"{(image).rsplit('.', 1)[0]}_b{smooth}")
+			siril.cmd("save", newimage)
+			new_images.append(f"{newimage}.fit")
+			
 def bkg_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit"):
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
 			siril.log("Starting GraXpert background extraction on " + image)			
 			siril.cmd("load", image)
 			siril.cmd("pyscript GraXpert-AI.py -bge -smoothing " + bkgGraX)
-			siril.cmd("save", image)
+			newimage = (f"{(image).rsplit('.', 1)[0]}_bg{bkgGraX}")
+			siril.cmd("save", newimage)
+			new_images.append(f"{newimage}.fit")
 
 def denoise(workdir):
 	os.chdir(workdir)
@@ -73,7 +78,8 @@ def denoise(workdir):
 			siril.log("Starting denoise on " + image)
 			siril.cmd("load", image)
 			siril.cmd("denoise -indep -vst")
-			siril.cmd("save", image)
+			newimage = (f"{os.path.splitext(image)[0]}_ds")
+			siril.cmd("save", newimage)
 
 def denoise_CC(workdir):
 # find CosmicClaritySuitepath paths
@@ -89,19 +95,19 @@ def denoise_CC(workdir):
 		sys.exit(1)
 
 	os.chdir(cc_input_dir)
-	for image in os.listdir():
-		os.remove(image)
+	for oldimage in os.listdir():
+		os.remove(oldimage)
 	os.chdir(workdir)
 
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit"):
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
 			siril.log(image)
 			shutil.copy(image, cc_input_dir)			
 			cmd = f"{executable_path} --denoise_mode {denoiseCC_mode} --denoise_strength {denoiseCC_strength} --separate_channels"
 			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
 
 			percent_re = re.compile(r"(\d+\.?\d*)" + "%")
-			if process.stdout:
+			if process.stdout:			
 				for line in iter(process.stdout.readline, ''):
 					line = line.strip()
 					if not line:
@@ -117,22 +123,27 @@ def denoise_CC(workdir):
 							siril.log(line)
 			process.wait()
 		
-	os.chdir(cc_input_dir)
-	for image in os.listdir():
-		os.remove(image)
-	os.chdir(cc_output_dir)
-	for image in os.listdir():
-		print(image)
-		shutil.move(image, workdir)
-				
+			os.chdir(cc_input_dir)
+			for oldimage in os.listdir():
+				os.remove(oldimage)
+			os.chdir(cc_output_dir)
+			for ccimage in os.listdir():
+				newimage = (f"{(image).rsplit('.', 1)[0]}_dc{denoiseCC_mode}{denoiseCC_strength}.fit")		
+				shutil.move(ccimage, (f"{workdir}/{newimage}"))
+				new_images.append(f"{newimage}")		
+			os.chdir(workdir)
+	
 def denoise_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit"):
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
 			siril.log("Starting GraXpert denoise on " + image)
 			siril.cmd("load", image)
 			siril.cmd("pyscript GraXpert-AI.py -gpu -denoise -strength " + denoiseGraX)
-			siril.cmd("save", image)
+			newimage = (f"{(image).rsplit('.', 1)[0]}_dg{denoiseGraX}")
+			siril.cmd("save", newimage)
+			new_images.append(f"{newimage}.fit")
+
 			 
 def sharpen(workdir):
 	os.chdir(workdir)
@@ -142,7 +153,8 @@ def sharpen(workdir):
 			siril.cmd("load", image)
 			siril.cmd("rl -gdstep=0.0003 -iters=40 -alpha=3000 -tv")
 			siril.cmd("rl -gdstep=0.0002 -iters=40 -alpha=3000 -tv")
-			siril.cmd("save", image)
+			newimage = (f"{os.path.splitext(image)[0]}_ss")
+			siril.cmd("save", newimage)
 
 def sharpen_CC(workdir):
 # find CosmicClaritySuitepath paths
@@ -163,7 +175,7 @@ def sharpen_CC(workdir):
 	os.chdir(workdir)		
 
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit"):
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
 			shutil.copy(image, cc_input_dir)
 			cmd = f"{executable_path} --sharpening_mode '{sharpenCC_mode}' --nonstellar_strength {sharpenCC_non_stellar_strength} --stellar_amount {sharpenCC_stellar_amount} --nonstellar_amount  {sharpenCC_non_stellar_amount} --auto_detect_psf --sharpen_channels_separately"
 			print(cmd)
@@ -186,18 +198,20 @@ def sharpen_CC(workdir):
 							siril.log(line)
 			process.wait()
 
-	os.chdir(cc_input_dir)
-	for image in os.listdir():
-		os.remove(image)
-	os.chdir(cc_output_dir)
-	for image in os.listdir():
-		print(image)
-		shutil.move(image, workdir)
+			os.chdir(cc_input_dir)
+			for oldimage in os.listdir():
+				os.remove(oldimage)
+			os.chdir(cc_output_dir)
+			for ccimage in os.listdir():
+				newimage = (f"{(image).rsplit('.', 1)[0]}_sc{sharpenCC_mode}-{sharpenCC_non_stellar_strength}-{sharpenCC_stellar_amount}-{sharpenCC_non_stellar_amount}.fit")		
+				shutil.move(ccimage, (f"{workdir}/{newimage}"))
+				new_images.append(f"{newimage}")		
+			os.chdir(workdir)
 
 def sharpen_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit"):
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
 			siril.log("Starting GraXpert sharpen on " + image)
 			siril.cmd("load", image)
 			if sharpenGraX_mode == "both":
@@ -207,8 +221,24 @@ def sharpen_GraX(workdir):
 				siril.cmd("pyscript GraXpert-AI.py -gpu -deconv_obj -strength " + sharpenGraX_strength)			
 			if sharpenGraX_mode == "stellar":
 				siril.cmd("pyscript GraXpert-AI.py -gpu -deconv_stellar -strength " + sharpenGraX_strength)			
-			siril.cmd("save", image)			
+			newimage = (f"{(image).rsplit('.', 1)[0]}_sg{sharpenGraX_mode}{sharpenGraX_strength}")
+			siril.cmd("save", newimage)
+			new_images.append(f"{newimage}.fit")
 
+def spcc(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(".fits") or image.endswith(".fit"):
+			siril.log("Starting SPCC on " + image)
+			siril.cmd("load", image)			
+			siril.cmd("platesolve")
+			if Type == 'OSC':
+				siril.cmd(f'spcc \"-oscsensor={spcc_sensor}\" \"-oscfilter={spcc_oscfilter}\"')
+			if Type == 'mono':
+				siril.cmd(f'spcc \"-monosensor={spcc_sensor}\" \"-rfilter={spcc_rfilter}\" \"-gfilter={spcc_gfilter}\" \"-bfilter={spcc_bfilter}\"')
+			newimage = (f"{os.path.splitext(image)[0]}_spcc")
+			siril.cmd("save", newimage)
+			os.remove(image)
 
 def run_gui():
 	if 'QApplication' not in globals():
@@ -431,15 +461,16 @@ def run_gui():
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	parser.add_argument("-b","--bkg", nargs='+', help="siril background extraction, provide smoothing 0.0-1.0")
-	parser.add_argument("-bg","--bkgGraX", nargs='+', help="siril background extraction, provide smoothing 0.0-1.0")
+	parser.add_argument("-b","--bkg", nargs='+', action='append', help="siril background extraction, provide smoothing 0.0-1.0")
+	parser.add_argument("-bg","--bkgGraX", nargs='+', action='append', help="siril background extraction, provide smoothing 0.0-1.0")
+	parser.add_argument("-cc","--spcc", nargs='+', help="spcc color calibration, provide sensor and filter(s) OSC or R, G & B, using quotes")
 	parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
 	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
-	parser.add_argument("-dc","--denoiseCC", nargs='+', help="run CC denoise, provide mode (luminance, full, separate) and denoise strength 0.0-1.0")
-	parser.add_argument("-dg","--denoiseGraX", nargs='+', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
+	parser.add_argument("-dc","--denoiseCC", nargs='+', action='append', help="run CC denoise, provide mode (luminance, full, separate) and denoise strength 0.0-1.0")
+	parser.add_argument("-dg","--denoiseGraX", nargs='+', action='append', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
 	parser.add_argument("-ss","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
-	parser.add_argument("-sc","--sharpenCC", nargs='+', help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
-	parser.add_argument("-sg","--sharpenGraX", nargs='+', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
+	parser.add_argument("-sc","--sharpenCC", nargs='+', action='append' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
+	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
 	
 	siril = s.SirilInterface()
 
@@ -459,48 +490,75 @@ if __name__ == '__main__':
 			print("\n**** ERROR *** " +  str(e) + "\n" )
 
 		if args.bkg:
-			smooth = (args.bkg[0])
-			bkg(workdir)
+			new_images = []
+			for n in args.bkg:
+				smooth = (n[0])			
+				bkg(workdir)
 
 		if args.bkgGraX:
-			bkgGraX = (args.bkgGraX[0])
-			bkg_GraX(workdir)
+			new_images = []
+			for n in args.bkgGraX:
+				bkgGraX = (n[0])
+				bkg_GraX(workdir)
+
+		if args.spcc:
+			spcc_sensor = (args.spcc[0])
+			if (len (args.spcc)) == 2:
+				Type = 'OSC'
+				spcc_oscfilter = (args.spcc[1])
+			elif (len (args.spcc)) == 4:
+				Type = 'mono'
+				spcc_rfilter = (args.spcc[1])
+				spcc_gfilter = (args.spcc[2])				
+				spcc_bfilter = (args.spcc[3])				
+			else:
+				print("spcc needs 2 args for OSC or 4 args for mono")
+				sys.exit(1)
+			spcc(workdir)			
 
 		if args.denoise:
 			denoise(workdir)
 
 		if args.denoiseCC:
-			denoiseCC_mode = (args.denoiseCC[0])
-			denoiseCC_strength = (args.denoiseCC[1])
-			denoise_CC(workdir)
+			new_images = []
+			for n in args.denoiseCC:
+				denoiseCC_mode = (n[0])
+				denoiseCC_strength = (n[1])
+				denoise_CC(workdir)
 			
 		if args.denoiseGraX:
-			denoiseGraX = (args.denoiseGraX[0])
-			denoise_GraX(workdir)
+			new_images = []
+			for n in args.denoiseGraX:
+				denoiseGraX = (n[0])
+				denoise_GraX(workdir)
 
 		if args.sharpen:
 			sharpen(workdir)
-				
-		if args.sharpenGraX:
-			sharpenGraX_mode = (args.sharpenGraX[0])
-			sharpenGraX_strength = (args.sharpenGraX[1])
-			sharpen_GraX(workdir)
 			
 		if args.sharpenCC:
-			sharpenCC_mode = (args.sharpenCC[0])
-			if (args.sharpenCC[0]) == 'Both':
-				sharpenCC_stellar_amount = (args.sharpenCC[1])
-				sharpenCC_non_stellar_amount = (args.sharpenCC[2])	
-				sharpenCC_non_stellar_strength = (args.sharpenCC[3])
-			elif (args.sharpenCC[0]) == 'Non-Stellar Only':
-				sharpenCC_non_stellar_amount = (args.sharpenCC[1])	
-				sharpenCC_non_stellar_strength = (args.sharpenCC[2])						
-				sharpenCC_stellar_amount = '0'
-			elif (args.sharpenCC[0]) == 'Stellar Only':
-				sharpenCC_stellar_amount = (args.sharpenCC[1])			
-				sharpenCC_non_stellar_amount = '0'	
-				sharpenCC_non_stellar_strength = '0'		
-			else:
-				print('Mode needs to be either Both, Stellar Only or Non-Stellar Only')
-				sys.exit(1)
-			sharpen_CC(workdir)
+			new_images = []
+			for n in args.sharpenCC:			
+				sharpenCC_mode = (n[0])
+				if (n[0]) == 'Both':
+					sharpenCC_stellar_amount = (n[1])
+					sharpenCC_non_stellar_amount = (n[2])	
+					sharpenCC_non_stellar_strength = (n[3])
+				elif (n[0]) == 'Non-Stellar Only':
+					sharpenCC_non_stellar_amount = (n[1])	
+					sharpenCC_non_stellar_strength = (n[2])						
+					sharpenCC_stellar_amount = '0'
+				elif (n[0]) == 'Stellar Only':
+					sharpenCC_stellar_amount = (n[1])			
+					sharpenCC_non_stellar_amount = '0'	
+					sharpenCC_non_stellar_strength = '0'		
+				else:
+					print('Mode needs to be either Both, Stellar Only or Non-Stellar Only')
+					sys.exit(1)
+				sharpen_CC(workdir)
+			
+		if args.sharpenGraX:
+			new_images = []
+			for n in args.sharpenGraX:
+				sharpenGraX_mode = (n[0])
+				sharpenGraX_strength = (n[1])
+				sharpen_GraX(workdir)
