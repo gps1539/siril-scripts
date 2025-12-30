@@ -141,8 +141,10 @@ def register(process_dir):
 def stack(process_dir):
 	siril.cmd(f"cd {process_dir}")
 	siril.cmd("load pp_light_00001.fit")
-	obj = (siril.get_image_fits_header(
-		return_as='dict')['OBJECT']).replace(" ", "")
+	try:
+		obj = (siril.get_image_fits_header(return_as='dict')['OBJECT']).replace(" ", "")
+	except KeyError:
+		obj = ("")
 	siril.cmd(f"stack r_{light_seq} rej 3 3 -norm=addscale -output_norm -rgb_equal -maximize -filter-included -weight=wfwhm  -feather={feather} -out=../{obj}_b{bkg}-r{roundf}-w{wfwhm}-z{drizzle_scale}-f{feather}-$LIVETIME:%d$s")
 	siril.cmd("close")
 
