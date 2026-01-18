@@ -19,7 +19,7 @@ from Graham Smith (2025)
 
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
-0.1.1	Initial submittal for merge request
+0.1.2	Initial submittal for merge request
 
 """
 
@@ -31,7 +31,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 # PyQt6 for GUI
 try:
@@ -43,7 +43,7 @@ except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
 	pass
 
-new_images = []
+processed_images = []
 
 # ==============================================================================
 # Prototype sirilpy processing script
@@ -52,34 +52,35 @@ new_images = []
 def bkg(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
 			siril.log("Starting background extraction on " + image)
 			siril.cmd("load", image)
 			siril.cmd("subsky -rbf -samples=20 -tolerance=1.0 -smooth=" + smooth)
 			newimage = (f"{(image).rsplit('.', 1)[0]}_b{smooth}")
 			siril.cmd("save", newimage)
-			new_images.append(f"{newimage}.fit")
+			processed_images.append(f"{image}")
 			
 def bkg_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
 			siril.log("Starting GraXpert background extraction on " + image)			
 			siril.cmd("load", image)
 			siril.cmd("pyscript GraXpert-AI.py -bge -smoothing " + bkgGraX)
 			newimage = (f"{(image).rsplit('.', 1)[0]}_bg{bkgGraX}")
 			siril.cmd("save", newimage)
-			new_images.append(f"{newimage}.fit")
+			processed_images.append(f"{image}")
 
 def denoise(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit"):
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
 			siril.log("Starting denoise on " + image)
 			siril.cmd("load", image)
 			siril.cmd("denoise -indep -vst")
 			newimage = (f"{os.path.splitext(image)[0]}_ds")
 			siril.cmd("save", newimage)
+			processed_images.append(f"{image}")
 
 def denoise_CC(workdir):
 # find CosmicClaritySuitepath paths
@@ -100,7 +101,7 @@ def denoise_CC(workdir):
 	os.chdir(workdir)
 
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
 			siril.log(image)
 			shutil.copy(image, cc_input_dir)			
 			cmd = f"{executable_path} --denoise_mode {denoiseCC_mode} --denoise_strength {denoiseCC_strength} --separate_channels"
@@ -130,31 +131,31 @@ def denoise_CC(workdir):
 			for ccimage in os.listdir():
 				newimage = (f"{(image).rsplit('.', 1)[0]}_dc{denoiseCC_mode}{denoiseCC_strength}.fit")		
 				shutil.move(ccimage, (f"{workdir}/{newimage}"))
-				new_images.append(f"{newimage}")		
+				processed_images.append(f"{image}")		
 			os.chdir(workdir)
 	
 def denoise_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
 			siril.log("Starting GraXpert denoise on " + image)
 			siril.cmd("load", image)
 			siril.cmd("pyscript GraXpert-AI.py -gpu -denoise -strength " + denoiseGraX)
 			newimage = (f"{(image).rsplit('.', 1)[0]}_dg{denoiseGraX}")
 			siril.cmd("save", newimage)
-			new_images.append(f"{newimage}.fit")
+			processed_images.append(f"{image}")
 
-			 
 def sharpen(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit"):
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
 			siril.log("Starting sharpen on " + image)
 			siril.cmd("load", image)
 			siril.cmd("rl -gdstep=0.0003 -iters=40 -alpha=3000 -tv")
 			siril.cmd("rl -gdstep=0.0002 -iters=40 -alpha=3000 -tv")
 			newimage = (f"{os.path.splitext(image)[0]}_ss")
 			siril.cmd("save", newimage)
+			processed_images.append(f"{image}")
 
 def sharpen_CC(workdir):
 # find CosmicClaritySuitepath paths
@@ -175,7 +176,7 @@ def sharpen_CC(workdir):
 	os.chdir(workdir)		
 
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
 			shutil.copy(image, cc_input_dir)
 			cmd = f"{executable_path} --sharpening_mode '{sharpenCC_mode}' --nonstellar_strength {sharpenCC_non_stellar_strength} --stellar_amount {sharpenCC_stellar_amount} --nonstellar_amount  {sharpenCC_non_stellar_amount} --auto_detect_psf --sharpen_channels_separately"
 			print(cmd)
@@ -205,13 +206,13 @@ def sharpen_CC(workdir):
 			for ccimage in os.listdir():
 				newimage = (f"{(image).rsplit('.', 1)[0]}_sc{sharpenCC_mode}-{sharpenCC_non_stellar_strength}-{sharpenCC_stellar_amount}-{sharpenCC_non_stellar_amount}.fit")		
 				shutil.move(ccimage, (f"{workdir}/{newimage}"))
-				new_images.append(f"{newimage}")		
+				processed_images.append(f"{image}")		
 			os.chdir(workdir)
 
 def sharpen_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in new_images:
+		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
 			siril.log("Starting GraXpert sharpen on " + image)
 			siril.cmd("load", image)
 			if sharpenGraX_mode == "both":
@@ -223,12 +224,12 @@ def sharpen_GraX(workdir):
 				siril.cmd("pyscript GraXpert-AI.py -gpu -deconv_stellar -strength " + sharpenGraX_strength)			
 			newimage = (f"{(image).rsplit('.', 1)[0]}_sg{sharpenGraX_mode}{sharpenGraX_strength}")
 			siril.cmd("save", newimage)
-			new_images.append(f"{newimage}.fit")
+			processed_images.append(f"{image}")
 
 def spcc(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit"):
+		if image.endswith(".fits") or image.endswith(".fit") and image not in processed_images:
 			siril.log("Starting SPCC on " + image)
 			siril.cmd("load", image)			
 			siril.cmd("platesolve")
@@ -239,6 +240,7 @@ def spcc(workdir):
 			newimage = (f"{os.path.splitext(image)[0]}_spcc")
 			siril.cmd("save", newimage)
 			os.remove(image)
+			processed_images.append(f"{image}")
 
 def run_gui():
 	if 'QApplication' not in globals():
@@ -490,13 +492,11 @@ if __name__ == '__main__':
 			print("\n**** ERROR *** " +  str(e) + "\n" )
 
 		if args.bkg:
-			new_images = []
 			for n in args.bkg:
 				smooth = (n[0])			
 				bkg(workdir)
 
 		if args.bkgGraX:
-			new_images = []
 			for n in args.bkgGraX:
 				bkgGraX = (n[0])
 				bkg_GraX(workdir)
@@ -520,14 +520,12 @@ if __name__ == '__main__':
 			denoise(workdir)
 
 		if args.denoiseCC:
-			new_images = []
 			for n in args.denoiseCC:
 				denoiseCC_mode = (n[0])
 				denoiseCC_strength = (n[1])
 				denoise_CC(workdir)
 			
 		if args.denoiseGraX:
-			new_images = []
 			for n in args.denoiseGraX:
 				denoiseGraX = (n[0])
 				denoise_GraX(workdir)
@@ -536,7 +534,6 @@ if __name__ == '__main__':
 			sharpen(workdir)
 			
 		if args.sharpenCC:
-			new_images = []
 			for n in args.sharpenCC:			
 				sharpenCC_mode = (n[0])
 				if (n[0]) == 'Both':
@@ -557,7 +554,6 @@ if __name__ == '__main__':
 				sharpen_CC(workdir)
 			
 		if args.sharpenGraX:
-			new_images = []
 			for n in args.sharpenGraX:
 				sharpenGraX_mode = (n[0])
 				sharpenGraX_strength = (n[1])
