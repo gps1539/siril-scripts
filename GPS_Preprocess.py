@@ -20,7 +20,7 @@ from Graham Smith (2025)
 
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
-0.1.0	Initial submittal for merge request
+0.1.1	Initial submittal for merge request
  
 """
 
@@ -37,7 +37,7 @@ VERSION = "0.1.0"
 try:
 	from PyQt6.QtWidgets import (
 		QApplication, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox,
-		QVBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox
+		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox
 	)
 except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
@@ -131,12 +131,11 @@ def register(process_dir):
 	flat = " " if args.no_calibration else " -flat=pp_flat_stacked"
 	if args.platesolve:
 		siril.cmd(
-			f"seqapplyreg {light_seq} -framing=max -filter-bkg={bkg} -filter-round={roundf} -filter-wfwhm={wfwhm} -kernel=square -drizzle -scale={drizzle_scale} -pixfrac={pix_frac} {flat}")
+			f"seqapplyreg {light_seq} -framing=max -filter-bkg={bkg} -filter-round={roundf} -filter-wfwhm={wfwhm} {drizzle} {flat}")
 	else:
 		siril.cmd(f"register {light_seq} -2pass")
 		siril.cmd(
-			f"seqapplyreg {light_seq} -filter-bkg={bkg} -filter-round={roundf} -filter-wfwhm={wfwhm} -kernel=square -drizzle -scale={drizzle_scale} -pixfrac={pix_frac} {flat}")
-
+			f"seqapplyreg {light_seq} -filter-bkg={bkg} -filter-round={roundf} -filter-wfwhm={wfwhm} {drizzle} {flat}")
 
 def stack(process_dir):
 	siril.cmd(f"cd {process_dir}")
@@ -188,10 +187,14 @@ def run_gui():
 			self.feather_input = QLineEdit("0")
 			form_layout.addRow("Feathering (px):", self.feather_input)
 
+			self.drizzle = QCheckBox("Drizzle (scale), enable for OSC")
 			self.drizzle_input = QLineEdit("1")
-			form_layout.addRow(
-				"Drizzle scaling (e.g., 1, 2):", self.drizzle_input)
-
+			self.drizzle_input.setEnabled(False)
+			self.drizzle.toggled.connect(self.drizzle_input.setEnabled)
+			drizzle_layout = QHBoxLayout()
+			drizzle_layout.addWidget(self.drizzle_input)
+			form_layout.addRow(self.drizzle, drizzle_layout)
+			
 			self.bkg_extract_cb = QCheckBox("Extract Background")
 			form_layout.addRow(self.bkg_extract_cb)
 
@@ -216,7 +219,7 @@ def run_gui():
 				"round": self.round_input.text(),
 				"wfwhm": self.wfwhm_input.text(),
 				"feather": self.feather_input.text(),
-				"drizzle": self.drizzle_input.text(),
+				"drizzle": self.drizzle_input.text() if self.drizzle.isChecked() else None,
 				"bkg_extract": self.bkg_extract_cb.isChecked(),
 				"no_calibration": self.no_calibration_cb.isChecked(),
 				"platesolve": self.platesolve_cb.isChecked(),
@@ -257,7 +260,8 @@ def run_gui():
 
 
 def main_logic(argv):
-	global args, workdir, bkg, roundf, wfwhm, drizzle_scale, pix_frac, feather, light_seq
+#	global args, workdir, bkg, roundf, wfwhm, drizzle_scale, pix_frac, feather, light_seq
+	global args, workdir, bkg, roundf, wfwhm, drizzle, drizzle_scale, feather, light_seq
 
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-b", "--background", nargs='+',
@@ -283,8 +287,12 @@ def main_logic(argv):
 	bkg = (args.background[0]) if args.background else '100%'
 	roundf = (args.round[0]) if args.round else '100%'
 	wfwhm = (args.wfwhm[0]) if args.wfwhm else '100%'
-	drizzle_scale = args.drizzle[0] if args.drizzle else '1'
-	pix_frac = str(1 / float(drizzle_scale))
+	if args.drizzle:
+		drizzle_scale = args.drizzle[0]
+		pix_frac = str(1 / float(drizzle_scale))
+		drizzle = f"-kernel=square -drizzle -scale={drizzle_scale} -pixfrac={pix_frac}"
+	else:
+		drizzle, drizzle_scale = " ", 0
 	feather = args.feather[0] if args.feather else '0'
 
 	try:
