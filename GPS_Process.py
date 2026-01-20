@@ -19,7 +19,7 @@ from Graham Smith (2025)
 
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
-0.1.2	Initial submittal for merge request
+0.1.3	Initial submittal for merge request
 
 """
 
@@ -31,7 +31,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 
 # PyQt6 for GUI
 try:
@@ -52,7 +52,7 @@ processed_images = []
 def bkg(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log("Starting background extraction on " + image)
 			siril.cmd("load", image)
 			siril.cmd("subsky -rbf -samples=20 -tolerance=1.0 -smooth=" + smooth)
@@ -63,7 +63,7 @@ def bkg(workdir):
 def bkg_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log("Starting GraXpert background extraction on " + image)			
 			siril.cmd("load", image)
 			siril.cmd("pyscript GraXpert-AI.py -bge -smoothing " + bkgGraX)
@@ -74,7 +74,7 @@ def bkg_GraX(workdir):
 def denoise(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log("Starting denoise on " + image)
 			siril.cmd("load", image)
 			siril.cmd("denoise -indep -vst")
@@ -83,7 +83,7 @@ def denoise(workdir):
 			processed_images.append(f"{image}")
 
 def denoise_CC(workdir):
-# find CosmicClaritySuitepath paths
+	compress = (siril.get_siril_config('compression','enabled'))
 	config_dir = siril.get_siril_configdir()
 	if os.path.isfile (f"{config_dir}/sirilcc_denoise.conf"):
 		config_file_path = (f"{config_dir}/sirilcc_denoise.conf")
@@ -101,9 +101,20 @@ def denoise_CC(workdir):
 	os.chdir(workdir)
 
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log(image)
+			# CosmicClaritySuite does not support compressed fit files
+			if image.endswith(('.fz')):
+				if compress:
+					siril.cmd("setcompress 0")
+				siril.cmd("load", image)
+				siril.cmd("save", image)
+				image = os.path.splitext(image)[0]
+				os.remove(f"{image}.fz")
+				if compress:
+					siril.cmd("setcompress 1")
 			shutil.copy(image, cc_input_dir)			
+
 			cmd = f"{executable_path} --denoise_mode {denoiseCC_mode} --denoise_strength {denoiseCC_strength} --separate_channels"
 			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
 
@@ -137,7 +148,7 @@ def denoise_CC(workdir):
 def denoise_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log("Starting GraXpert denoise on " + image)
 			siril.cmd("load", image)
 			siril.cmd("pyscript GraXpert-AI.py -gpu -denoise -strength " + denoiseGraX)
@@ -148,7 +159,7 @@ def denoise_GraX(workdir):
 def sharpen(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log("Starting sharpen on " + image)
 			siril.cmd("load", image)
 			siril.cmd("rl -gdstep=0.0003 -iters=40 -alpha=3000 -tv")
@@ -158,7 +169,7 @@ def sharpen(workdir):
 			processed_images.append(f"{image}")
 
 def sharpen_CC(workdir):
-# find CosmicClaritySuitepath paths
+	compress = (siril.get_siril_config('compression','enabled'))# find CosmicClaritySuitepath paths
 	config_dir = siril.get_siril_configdir()
 	if os.path.isfile (f"{config_dir}/sirilcc_sharpen.conf"):
 		config_file_path = (f"{config_dir}/sirilcc_sharpen.conf")
@@ -176,7 +187,18 @@ def sharpen_CC(workdir):
 	os.chdir(workdir)		
 
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log(image)
+			# CosmicClaritySuite does not support compressed fit files
+			if image.endswith(('.fz')):
+				if compress:
+					siril.cmd("setcompress 0")
+				siril.cmd("load", image)
+				siril.cmd("save", image)
+				image = os.path.splitext(image)[0]
+				os.remove(f"{image}.fz")
+				if compress:
+					siril.cmd("setcompress 1")
 			shutil.copy(image, cc_input_dir)
 			cmd = f"{executable_path} --sharpening_mode '{sharpenCC_mode}' --nonstellar_strength {sharpenCC_non_stellar_strength} --stellar_amount {sharpenCC_stellar_amount} --nonstellar_amount  {sharpenCC_non_stellar_amount} --auto_detect_psf --sharpen_channels_separately"
 			print(cmd)
@@ -212,7 +234,7 @@ def sharpen_CC(workdir):
 def sharpen_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if (image.endswith(".fits") or image.endswith(".fit")) and image not in processed_images:
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log("Starting GraXpert sharpen on " + image)
 			siril.cmd("load", image)
 			if sharpenGraX_mode == "both":
@@ -229,7 +251,7 @@ def sharpen_GraX(workdir):
 def spcc(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
-		if image.endswith(".fits") or image.endswith(".fit") and image not in processed_images:
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log("Starting SPCC on " + image)
 			siril.cmd("load", image)			
 			siril.cmd("platesolve")
