@@ -20,7 +20,7 @@ from Graham Smith (2025)
 
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
-0.1.1	Initial submittal for merge request
+0.1.2	Initial submittal for merge request
  
 """
 
@@ -31,7 +31,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 	
 # PyQt6 for GUI
 try:
@@ -49,7 +49,7 @@ except ImportError:
 # ==============================================================================
 
 def master_bias(bias_dir, process_dir):
-	if os.path.exists(os.path.join(workdir, 'process/bias_stacked.fit')):
+	if os.path.exists(os.path.join(workdir, 'process/bias_stacked.fit')) or os.path.exists(os.path.join(workdir, 'process/bias_stacked.fit.fz')):
 		print('master bias exists, skipping')
 		return
 	else:
@@ -60,7 +60,7 @@ def master_bias(bias_dir, process_dir):
 
 
 def master_flat(flat_dir, process_dir):
-	if os.path.exists(os.path.join(workdir, 'process/pp_flat_stacked.fit')):
+	if os.path.exists(os.path.join(workdir, 'process/pp_flat_stacked.fit')) or os.path.exists(os.path.join(workdir, 'process/pp_flat_stacked.fit.fz')):
 		print('master flat exists, skipping')
 		return
 	else:
@@ -72,7 +72,7 @@ def master_flat(flat_dir, process_dir):
 
 
 def master_dark(dark_dir, process_dir):
-	if os.path.exists(os.path.join(workdir, 'process/dark_stacked.fit')):
+	if os.path.exists(os.path.join(workdir, 'process/dark_stacked.fit')) or os.path.exists(os.path.join(workdir, 'process/dark_stacked.fit.fz')):
 		print('master dark exists, skipping')
 		return
 	else:
@@ -139,7 +139,7 @@ def register(process_dir):
 
 def stack(process_dir):
 	siril.cmd(f"cd {process_dir}")
-	siril.cmd("load pp_light_00001.fit")
+	siril.cmd("load pp_light_00001")
 	try:
 		obj = (siril.get_image_fits_header(return_as='dict')['OBJECT']).replace(" ", "")
 	except KeyError:
