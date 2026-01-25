@@ -20,7 +20,7 @@ from Graham Smith (2025)
 
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
-0.1.2	Initial submittal for merge request
+0.1.3	Initial submittal for merge request
  
 """
 
@@ -31,7 +31,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 	
 # PyQt6 for GUI
 try:
@@ -122,8 +122,11 @@ def platesolve(process_dir):
 			print('sequence platesolved, skipping')
 			return
 	siril.cmd("cd " + process_dir)
-	siril.cmd(
-		f"seqplatesolve {light_seq} -nocache -catalog=nomad -force -disto=ps_distortion")
+	if args.platesolve == True :
+		focal = " "
+	else:
+		focal = (f"-focal={args.platesolve}")		
+	siril.cmd(f"seqplatesolve {light_seq} -nocache -catalog=nomad -force -disto=ps_distortion {focal}")
 
 
 def register(process_dir):
@@ -264,24 +267,15 @@ def main_logic(argv):
 	global args, workdir, bkg, roundf, wfwhm, drizzle, drizzle_scale, feather, light_seq
 
 	parser = argparse.ArgumentParser()
-	parser.add_argument("-b", "--background", nargs='+',
-						help="background filter settings, XX%% or X")
-	parser.add_argument(
-		"-bg", "--bkg", help="extract background", action="store_true")
-	parser.add_argument("-d", "--workdir", nargs='+',
-						help="set working directory")
-	parser.add_argument("-f", "--feather", nargs='+',
-						help="set feathering amount in px")
-	parser.add_argument("-nc", "--no_calibration",
-						help="do not calibrate", action="store_true")
-	parser.add_argument("-ps", "--platesolve",
-						help="platesolve", action="store_true")
-	parser.add_argument("-r", "--round", nargs='+',
-						help="round filter settings, XX%% or X")
-	parser.add_argument("-w", "--wfwhm", nargs='+',
-						help="wfwhm filter settings, XX%% or X")
-	parser.add_argument("-z", "--drizzle", nargs='+',
-						help="sets drizzle scaling, default =1X")
+	parser.add_argument("-b", "--background", nargs='+', help="background filter settings, XX%% or X")
+	parser.add_argument("-bg", "--bkg", help="extract background", action="store_true")
+	parser.add_argument("-d", "--workdir", nargs='+', help="set working directory")
+	parser.add_argument("-f", "--feather", nargs='+', help="set feathering amount in px")
+	parser.add_argument("-nc", "--no_calibration", help="do not calibrate", action="store_true")
+	parser.add_argument("-ps", "--platesolve", nargs='?', const=True, help="platesolve, optionally provide focal lenght")
+	parser.add_argument("-r", "--round", nargs='+',	help="round filter settings, XX%% or X")
+	parser.add_argument("-w", "--wfwhm", nargs='+',	help="wfwhm filter settings, XX%% or X")
+	parser.add_argument("-z", "--drizzle", nargs='+', help="set drizzle scaling, required for OSC images")
 	args = parser.parse_args(argv)
 
 	bkg = (args.background[0]) if args.background else '100%'

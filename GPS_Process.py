@@ -19,7 +19,7 @@ from Graham Smith (2025)
 
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
-0.1.3	Initial submittal for merge request
+0.1.4	Initial submittal for merge request
 
 """
 
@@ -31,7 +31,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 
 # PyQt6 for GUI
 try:
@@ -164,6 +164,7 @@ def sharpen(workdir):
 			siril.cmd("load", image)
 			siril.cmd("rl -gdstep=0.0003 -iters=40 -alpha=3000 -tv")
 			siril.cmd("rl -gdstep=0.0002 -iters=40 -alpha=3000 -tv")
+			siril.cmd("rl -gdstep=0.0001 -iters=40 -alpha=3000 -tv")
 			newimage = (f"{os.path.splitext(image)[0]}_ss")
 			siril.cmd("save", newimage)
 			processed_images.append(f"{image}")
@@ -486,7 +487,7 @@ def run_gui():
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-b","--bkg", nargs='+', action='append', help="siril background extraction, provide smoothing 0.0-1.0")
-	parser.add_argument("-bg","--bkgGraX", nargs='+', action='append', help="siril background extraction, provide smoothing 0.0-1.0")
+	parser.add_argument("-bg","--bkgGraX", nargs='+', action='append', help="GraXpert background extraction, provide smoothing 0.0-1.0")
 	parser.add_argument("-cc","--spcc", nargs='+', help="spcc color calibration, provide sensor and filter(s) OSC or R, G & B, using quotes")
 	parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
 	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
