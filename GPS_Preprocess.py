@@ -21,6 +21,7 @@ from Graham Smith (2025)
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
 0.1.3	Initial submittal for merge request
+0.1.4   Added nbstars as an optional filter. 
  
 """
 
@@ -31,7 +32,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 	
 # PyQt6 for GUI
 try:
@@ -134,11 +135,11 @@ def register(process_dir):
 	flat = " " if args.no_calibration else " -flat=pp_flat_stacked"
 	if args.platesolve:
 		siril.cmd(
-			f"seqapplyreg {light_seq} -framing=max -filter-bkg={bkg} -filter-round={roundf} -filter-wfwhm={wfwhm} {drizzle} {flat}")
+			f"seqapplyreg {light_seq} -framing=max -filter-bkg={bkg} -filter-nbstars={stars} -filter-round={roundf} -filter-wfwhm={wfwhm} {drizzle} {flat}")
 	else:
 		siril.cmd(f"register {light_seq} -2pass")
 		siril.cmd(
-			f"seqapplyreg {light_seq} -filter-bkg={bkg} -filter-round={roundf} -filter-wfwhm={wfwhm} {drizzle} {flat}")
+			f"seqapplyreg {light_seq} -filter-bkg={bkg} -filter-nbstars={stars} -filter-round={roundf} -filter-wfwhm={wfwhm} {drizzle} {flat}")
 
 def stack(process_dir):
 	siril.cmd(f"cd {process_dir}")
@@ -147,7 +148,7 @@ def stack(process_dir):
 		obj = (siril.get_image_fits_header(return_as='dict')['OBJECT']).replace(" ", "")
 	except KeyError:
 		obj = ("")
-	siril.cmd(f"stack r_{light_seq} rej 3 3 -norm=addscale -output_norm -rgb_equal -maximize -filter-included -weight=wfwhm  -feather={feather} -out=../{obj}_b{bkg}-r{roundf}-w{wfwhm}-z{drizzle_scale}-f{feather}-$LIVETIME:%d$s")
+	siril.cmd(f"stack r_{light_seq} rej 3 3 -norm=addscale -output_norm -rgb_equal -maximize -filter-included -weight=wfwhm  -feather={feather} -out=../{obj}_b{bkg}-s{stars}-r{roundf}-w{wfwhm}-z{drizzle_scale}-f{feather}-$LIVETIME:%d$s")
 	siril.cmd("close")
 
 # ==============================================================================
@@ -178,12 +179,14 @@ def run_gui():
 				sys.exit(1)
 
 			self.background_input = QLineEdit("100%")
-			form_layout.addRow(
-				"Background filter (XX% or X):", self.background_input)
-
+			form_layout.addRow("Background filter (XX% or X):", self.background_input)
+			
 			self.round_input = QLineEdit("100%")
 			form_layout.addRow("Round filter (XX% or X):", self.round_input)
 
+			self.stars_input = QLineEdit("100%")
+			form_layout.addRow("Number of stars (XX% or X):", self.stars_input)
+				
 			self.wfwhm_input = QLineEdit("100%")
 			form_layout.addRow("wFWHM filter (XX% or X):", self.wfwhm_input)
 
@@ -220,6 +223,7 @@ def run_gui():
 				"workdir": self.workdir_input.text(),
 				"background": self.background_input.text(),
 				"round": self.round_input.text(),
+				"stars": self.stars_input.text(),
 				"wfwhm": self.wfwhm_input.text(),
 				"feather": self.feather_input.text(),
 				"drizzle": self.drizzle_input.text() if self.drizzle.isChecked() else None,
@@ -240,6 +244,8 @@ def run_gui():
 			cli_args.extend(["-b", values["background"]])
 		if values["round"]:
 			cli_args.extend(["-r", values["round"]])
+		if values["stars"]:
+			cli_args.extend(["-s", values["stars"]])
 		if values["wfwhm"]:
 			cli_args.extend(["-w", values["wfwhm"]])
 		if values["feather"]:
@@ -263,8 +269,7 @@ def run_gui():
 
 
 def main_logic(argv):
-#	global args, workdir, bkg, roundf, wfwhm, drizzle_scale, pix_frac, feather, light_seq
-	global args, workdir, bkg, roundf, wfwhm, drizzle, drizzle_scale, feather, light_seq
+	global args, workdir, bkg, stars, roundf, wfwhm, drizzle, drizzle_scale, feather, light_seq
 
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-b", "--background", nargs='+', help="background filter settings, XX%% or X")
@@ -274,11 +279,13 @@ def main_logic(argv):
 	parser.add_argument("-nc", "--no_calibration", help="do not calibrate", action="store_true")
 	parser.add_argument("-ps", "--platesolve", nargs='?', const=True, help="platesolve, optionally provide focal lenght")
 	parser.add_argument("-r", "--round", nargs='+',	help="round filter settings, XX%% or X")
+	parser.add_argument("-s", "--stars", nargs='+', help="# of stars filter settings, XX%% or X")
 	parser.add_argument("-w", "--wfwhm", nargs='+',	help="wfwhm filter settings, XX%% or X")
 	parser.add_argument("-z", "--drizzle", nargs='+', help="set drizzle scaling, required for OSC images")
 	args = parser.parse_args(argv)
 
 	bkg = (args.background[0]) if args.background else '100%'
+	stars = (args.stars[0]) if args.stars else '100%'
 	roundf = (args.round[0]) if args.round else '100%'
 	wfwhm = (args.wfwhm[0]) if args.wfwhm else '100%'
 	if args.drizzle:
