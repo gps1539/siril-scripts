@@ -193,6 +193,7 @@ def run_gui():
 			self.feather_input = QLineEdit("0")
 			form_layout.addRow("Feathering (px):", self.feather_input)
 
+
 			self.drizzle = QCheckBox("Drizzle (scale), enable for OSC")
 			self.drizzle_input = QLineEdit("1")
 			self.drizzle_input.setEnabled(False)
@@ -207,8 +208,13 @@ def run_gui():
 			self.no_calibration_cb = QCheckBox("No Calibration")
 			form_layout.addRow(self.no_calibration_cb)
 
-			self.platesolve_cb = QCheckBox("Platesolve")
-			form_layout.addRow(self.platesolve_cb)
+			self.platesolve_cb = QCheckBox("Platesolve, optionally provide focal lenght")
+			self.platesolve_input = QLineEdit()
+			self.platesolve_input.setEnabled(False)
+			self.platesolve_cb.toggled.connect(self.platesolve_input.setEnabled)
+			platesolve_layout = QHBoxLayout()
+			platesolve_layout.addWidget(self.platesolve_input)
+			form_layout.addRow(self.platesolve_cb, platesolve_layout)
 
 			layout.addLayout(form_layout)
 
@@ -229,7 +235,7 @@ def run_gui():
 				"drizzle": self.drizzle_input.text() if self.drizzle.isChecked() else None,
 				"bkg_extract": self.bkg_extract_cb.isChecked(),
 				"no_calibration": self.no_calibration_cb.isChecked(),
-				"platesolve": self.platesolve_cb.isChecked(),
+				"platesolve": self.platesolve_input.text() if self.platesolve_cb.isChecked() and self.platesolve_input.text() else self.platesolve_cb.isChecked(),
 			}
 
 	app = QApplication.instance() or QApplication(sys.argv)
@@ -258,6 +264,8 @@ def run_gui():
 			cli_args.append("-nc")
 		if values["platesolve"]:
 			cli_args.append("-ps")
+			if isinstance(values["platesolve"], str):
+				cli_args.append(values["platesolve"])
 
 		main_logic(cli_args)
 
