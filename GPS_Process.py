@@ -20,6 +20,7 @@ from Graham Smith (2025)
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
 0.1.4	Initial submittal for merge request
+0.1.5   Adds AutoBGE, Autostretch and Statistical Stretch
 
 """
 
@@ -31,7 +32,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 
 # PyQt6 for GUI
 try:
@@ -48,6 +49,28 @@ processed_images = []
 # ==============================================================================
 # Prototype sirilpy processing script
 # ==============================================================================
+
+def abe(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log("Starting background extraction on " + image)
+			siril.cmd("load", image)
+			siril.cmd(f"pyscript AutoBGE.py -npoints {npoints} -polydegree {polydegree} -rbfsmooth {rbfsmooth}")
+			newimage = (f"{(image).rsplit('.', 1)[0]}_ab{npoints}-{polydegree}-{rbfsmooth}")
+			siril.cmd("save", newimage)
+			processed_images.append(f"{image}")
+
+def autostretch(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log("Auto stretching " + image)
+			siril.cmd("load", image)
+			siril.cmd("autostretch -linked")
+			newimage = (f"{os.path.splitext(image)[0]}_as")
+			siril.cmd("save", newimage)
+			processed_images.append(f"{image}")
 
 def bkg(workdir):
 	os.chdir(workdir)
@@ -262,8 +285,19 @@ def spcc(workdir):
 				siril.cmd(f'spcc \"-monosensor={spcc_sensor}\" \"-rfilter={spcc_rfilter}\" \"-gfilter={spcc_gfilter}\" \"-bfilter={spcc_bfilter}\"')
 			newimage = (f"{os.path.splitext(image)[0]}_spcc")
 			siril.cmd("save", newimage)
-			os.remove(image)
+#			os.remove(image)
 			processed_images.append(f"{image}")
+
+def stretch(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log("Stretching " + image)
+			siril.cmd("load", image)
+			siril.cmd(f"pyscript Statistical_Stretch.py -linked -normalize -hdr -hdramount {stretch_hdr_amount} -hdrknee {stretch_hdr_knee} -boost {stretch_boost_amount}")
+			newimage = (f"{os.path.splitext(image)[0]}_ss{stretch_hdr_amount}-{stretch_hdr_knee}-{stretch_boost_amount}")
+			siril.cmd("save", newimage)
+			processed_images.append(f"{image}")			
 
 def run_gui():
 	if 'QApplication' not in globals():
@@ -282,6 +316,25 @@ def run_gui():
 			self.workdir_input = QLineEdit(os.getcwd())
 			form_layout.addRow("Working Directory:", self.workdir_input)
 
+			self.abe_cb = QCheckBox("Auto Background Extraction")
+			self.abe_npoints = QLineEdit("100")
+			self.abe_polydegree = QLineEdit("2")
+			self.abe_rbfsmooth = QLineEdit("0.1")
+			self.abe_npoints.setEnabled(False)
+			self.abe_polydegree.setEnabled(False)
+			self.abe_rbfsmooth.setEnabled(False)
+			self.abe_cb.toggled.connect(self.abe_npoints.setEnabled)
+			self.abe_cb.toggled.connect(self.abe_polydegree.setEnabled)
+			self.abe_cb.toggled.connect(self.abe_rbfsmooth.setEnabled)
+			abe_layout = QHBoxLayout()
+			abe_layout.addWidget(QLabel("Npoints:"))
+			abe_layout.addWidget(self.abe_npoints)
+			abe_layout.addWidget(QLabel("Polydegree:"))
+			abe_layout.addWidget(self.abe_polydegree)
+			abe_layout.addWidget(QLabel("Rbfsmooth:"))
+			abe_layout.addWidget(self.abe_rbfsmooth)
+			form_layout.addRow(self.abe_cb, abe_layout)
+			
 			self.bkg_cb = QCheckBox("Siril Background Extraction")
 			self.bkg_smooth = QLineEdit("0.5")
 			self.bkg_smooth.setEnabled(False)
@@ -346,7 +399,6 @@ def run_gui():
 			self.sharpen_cc_cb.toggled.connect(self.sharpen_cc_non_stellar_strength.setEnabled)
 			self.sharpen_cc_mode.currentTextChanged.connect(self.update_sharpen_cc_options)
 			self.update_sharpen_cc_options(self.sharpen_cc_mode.currentText())
-
 			sharpen_cc_layout = QHBoxLayout()
 			sharpen_cc_layout.addWidget(QLabel("Mode:"))
 			sharpen_cc_layout.addWidget(self.sharpen_cc_mode)
@@ -373,6 +425,28 @@ def run_gui():
 			sharpen_grax_layout.addWidget(self.sharpen_grax_strength)	
 			form_layout.addRow(self.sharpen_grax_cb, sharpen_grax_layout)
 
+			self.autostretch_cb = QCheckBox("Autostretch (linked)")
+			form_layout.addRow(self.autostretch_cb)
+			
+			self.stretch_cb = QCheckBox("Statistical Stretch")
+			self.stretch_hdr_amount = QLineEdit("0.15")
+			self.stretch_hdr_knee = QLineEdit("0.75")
+			self.stretch_boost_amount = QLineEdit("0.2")
+			self.stretch_hdr_amount.setEnabled(False)
+			self.stretch_hdr_knee.setEnabled(False)
+			self.stretch_boost_amount.setEnabled(False)
+			self.stretch_cb.toggled.connect(self.stretch_hdr_amount.setEnabled)
+			self.stretch_cb.toggled.connect(self.stretch_hdr_knee.setEnabled)
+			self.stretch_cb.toggled.connect(self.stretch_boost_amount.setEnabled)
+			stretch_layout = QHBoxLayout()
+			stretch_layout.addWidget(QLabel("HDR amount:"))
+			stretch_layout.addWidget(self.stretch_hdr_amount)
+			stretch_layout.addWidget(QLabel("HDR knee:"))
+			stretch_layout.addWidget(self.stretch_hdr_knee)
+			stretch_layout.addWidget(QLabel("Boost amount:"))
+			stretch_layout.addWidget(self.stretch_boost_amount)
+			form_layout.addRow(self.stretch_cb, stretch_layout)
+
 			layout.addLayout(form_layout)
 
 			self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -397,6 +471,7 @@ def run_gui():
 		def get_values(self):
 			return {
 				"workdir": self.workdir_input.text(),
+				"abe": [self.abe_npoints.text(), self.abe_polydegree.text(), self.abe_rbfsmooth.text()] if self.abe_cb.isChecked() else None,				
 				"bkg": self.bkg_smooth.text() if self.bkg_cb.isChecked() else None,
 				"bkgGraX": self.bkg_grax_smooth.text() if self.bkg_grax_cb.isChecked() else None,
 				"denoise": self.denoise_cb.isChecked(),
@@ -405,6 +480,8 @@ def run_gui():
 				"sharpen": self.sharpen_cb.isChecked(),
 				"sharpenCC": [self.sharpen_cc_mode.currentText(), self.sharpen_cc_stellar_amount.text(), self.sharpen_cc_non_stellar_amount.text(), self.sharpen_cc_non_stellar_strength.text()] if self.sharpen_cc_cb.isChecked() else None,
 				"sharpenGraX": [self.sharpen_grax_mode.currentText(), self.sharpen_grax_strength.text()] if self.sharpen_grax_cb.isChecked() else None,
+				"autostretch": self.autostretch_cb.isChecked(),				
+				"stretch": [self.stretch_hdr_amount.text(), self.stretch_hdr_knee.text(), self.stretch_boost_amount.text()] if self.stretch_cb.isChecked() else None,
 			}
 
 	app = QApplication.instance() or QApplication(sys.argv)
@@ -430,8 +507,14 @@ def run_gui():
 			msg_box.exec()
 			return
 
-		global smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength
+		global npoints, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount
 		
+		if values["abe"]:
+			npoints = values["abe"][0]
+			polydegree = values["abe"][1]
+			rbfsmooth = values["abe"][2]			
+			abe(workdir)		
+
 		if values["bkg"]:
 			smooth = values["bkg"]
 			bkg(workdir)
@@ -455,11 +538,6 @@ def run_gui():
 		if values["sharpen"]:
 			sharpen(workdir)
 
-		if values["sharpenGraX"]:
-			sharpenGraX_mode = values["sharpenGraX"][0]
-			sharpenGraX_strength = values["sharpenGraX"][1]
-			sharpen_GraX(workdir)
-			
 		if values["sharpenCC"]:
 			sharpenCC_mode = values["sharpenCC"][0]
 			sharpenCC_stellar_amount = values["sharpenCC"][1] if values["sharpenCC"][1] else None
@@ -474,6 +552,20 @@ def run_gui():
 
 			sharpen_CC(workdir)
 
+		if values["sharpenGraX"]:
+			sharpenGraX_mode = values["sharpenGraX"][0]
+			sharpenGraX_strength = values["sharpenGraX"][1]
+			sharpen_GraX(workdir)
+
+		if values["autostretch"]:
+			autostretch(workdir)
+			
+		if values["stretch"]:
+			stretch_hdr_amount = values["stretch"][0]
+			stretch_hdr_knee = values["stretch"][1]
+			stretch_boost_amount = values["stretch"][2]			
+			stretch(workdir)		
+
 		msg_box = QMessageBox()
 		msg_box.setIcon(QMessageBox.Icon.Information)
 		msg_box.setText("Processing finished.")
@@ -486,6 +578,8 @@ def run_gui():
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
+	parser.add_argument("-ab","--abe", nargs='+', action='append', help="AutoBGE, provide npoints, polydegree and rbfsmooth")
+	parser.add_argument("-as","--autostretch", help="Siril autostretch (linked)" ,action="store_true")
 	parser.add_argument("-b","--bkg", nargs='+', action='append', help="siril background extraction, provide smoothing 0.0-1.0")
 	parser.add_argument("-bg","--bkgGraX", nargs='+', action='append', help="GraXpert background extraction, provide smoothing 0.0-1.0")
 	parser.add_argument("-cc","--spcc", nargs='+', help="spcc color calibration, provide sensor and filter(s) OSC or R, G & B, using quotes")
@@ -493,9 +587,10 @@ if __name__ == '__main__':
 	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
 	parser.add_argument("-dc","--denoiseCC", nargs='+', action='append', help="run CC denoise, provide mode (luminance, full, separate) and denoise strength 0.0-1.0")
 	parser.add_argument("-dg","--denoiseGraX", nargs='+', action='append', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
-	parser.add_argument("-ss","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
+	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
 	parser.add_argument("-sc","--sharpenCC", nargs='+', action='append' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
+	parser.add_argument("-ss","--statstretch", nargs='+', action='append', help="statistical stretch, provide HDR amount, HDR knee and boost amount")
 	
 	siril = s.SirilInterface()
 
@@ -514,6 +609,13 @@ if __name__ == '__main__':
 		except Exception as e :
 			print("\n**** ERROR *** " +  str(e) + "\n" )
 
+		if args.abe:
+			for n in args.abe:
+				npoints = (n[0])
+				polydegree = (n[1])
+				rbfsmooth = (n[2])
+				abe(workdir)
+				
 		if args.bkg:
 			for n in args.bkg:
 				smooth = (n[0])			
@@ -581,3 +683,13 @@ if __name__ == '__main__':
 				sharpenGraX_mode = (n[0])
 				sharpenGraX_strength = (n[1])
 				sharpen_GraX(workdir)
+				
+		if args.autostretch:
+			autostretch(workdir)
+		
+		if args.statstretch:
+			for n in args.stretch:
+				stretch_hdr_amount = (n[0])
+				stretch_hdr_knee = (n[1])
+				stretch_boost_amount = (n[2])
+				stretch(workdir)
