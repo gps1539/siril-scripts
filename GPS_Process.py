@@ -20,7 +20,7 @@ from Graham Smith (2025)
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
 0.1.4	Initial submittal for merge request
-0.1.5   Adds AutoBGE, Autostretch and Statistical Stretch
+0.1.5   Adds AutoBGE, Autostretch, Statistical Stretch and Multiple process file handling
 
 """
 
@@ -44,6 +44,7 @@ except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
 	pass
 
+original_images = []
 processed_images = []
 
 # ==============================================================================
@@ -101,7 +102,7 @@ def denoise(workdir):
 			siril.log("Starting denoise on " + image)
 			siril.cmd("load", image)
 			siril.cmd("denoise -indep -vst")
-			newimage = (f"{os.path.splitext(image)[0]}_ds")
+			newimage = (f"{os.path.splitext(image)[0]}_d")
 			siril.cmd("save", newimage)
 			processed_images.append(f"{image}")
 
@@ -587,6 +588,7 @@ if __name__ == '__main__':
 	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
 	parser.add_argument("-dc","--denoiseCC", nargs='+', action='append', help="run CC denoise, provide mode (luminance, full, separate) and denoise strength 0.0-1.0")
 	parser.add_argument("-dg","--denoiseGraX", nargs='+', action='append', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
+	parser.add_argument("-m","--multiprocess", help="saves images under processed directory" ,action="store_true")	
 	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
 	parser.add_argument("-sc","--sharpenCC", nargs='+', action='append' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
@@ -608,6 +610,11 @@ if __name__ == '__main__':
 			siril.cmd("setext", "fit")
 		except Exception as e :
 			print("\n**** ERROR *** " +  str(e) + "\n" )
+
+		os.chdir(workdir)
+		for image in os.listdir():
+			if image.endswith(('.fits', '.fit', '.fts', '.fz')):
+				original_images.append(f"{image}")
 
 		if args.abe:
 			for n in args.abe:
@@ -693,3 +700,18 @@ if __name__ == '__main__':
 				stretch_hdr_knee = (n[1])
 				stretch_boost_amount = (n[2])
 				stretch(workdir)
+				
+		if args.multiprocess:
+			os.chdir(workdir)
+			base_directory = 'processed_' 
+			index = 1
+			while True:
+			    path = f"{base_directory}{index}"
+			    if os.path.isdir(path):
+			        index += 1  # Increment the index for the next iteration
+			    else:
+			        os.makedirs(f"{base_directory}{index}")
+        			break
+			for image in os.listdir():
+				if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in original_images:
+					shutil.move(image, (f"{workdir}/{base_directory}{index}"))
