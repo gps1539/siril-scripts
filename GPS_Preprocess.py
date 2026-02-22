@@ -3,7 +3,7 @@
 
 This script executes siril commands to calibrate, background extract(optional), platesolve(optional), register and stack subs. It accepts arguments to define working directory, filters, feathering and drizzling setting. It can run headlessly i.e. without the siril UI open, so it can run on a server or cloud instance.
 
-With the platesolving option the script can register mosaics.
+With the platesolving option the script can register mosaics and with multi session it can calibrate subs from mulitple session and combine to a single stack.
 
 The script can be started directly from the siril GUI, siril command line and can also be started from a ssf script using the 'pyscript' command i.e. pyscript GPS_Preprocess.py. Such a ssf script can run the this script several times i.e. to try different settings, with unique result files based on setting values. 
 
@@ -22,32 +22,28 @@ SPDX-License-Identifier: GPL-3.0-or-later
 -----
 0.1.3	Initial submittal for merge request
 0.1.4   Added nbstars as an optional filter. 
+0.1.5   Adds multi-session support to calibrate each session separately
  
 """
-
 
 import sys
 import os
 import sirilpy as s
 import argparse
 import re
+import shlex
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 	
 # PyQt6 for GUI
 try:
 	from PyQt6.QtWidgets import (
 		QApplication, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox,
-		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox
+		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox, QTextEdit
 	)
 except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
 	pass
-
-
-# ==============================================================================
-# Prototype sirilpy preprocessing script
-# ==============================================================================
 
 def master_bias(bias_dir, process_dir):
 	if os.path.exists(os.path.join(workdir, 'process/bias_stacked.fit')) or os.path.exists(os.path.join(workdir, 'process/bias_stacked.fit.fz')):
@@ -58,7 +54,6 @@ def master_bias(bias_dir, process_dir):
 		siril.cmd(f"convert bias -out={process_dir}")
 		siril.cmd(f"cd  {process_dir}")
 		siril.cmd(f"stack bias rej 3 3 -nonorm")
-
 
 def master_flat(flat_dir, process_dir):
 	if os.path.exists(os.path.join(workdir, 'process/pp_flat_stacked.fit')) or os.path.exists(os.path.join(workdir, 'process/pp_flat_stacked.fit.fz')):
@@ -71,7 +66,6 @@ def master_flat(flat_dir, process_dir):
 		siril.cmd("calibrate flat -bias=bias_stacked")
 		siril.cmd("stack pp_flat rej 3 3 -norm=mul")
 
-
 def master_dark(dark_dir, process_dir):
 	if os.path.exists(os.path.join(workdir, 'process/dark_stacked.fit')) or os.path.exists(os.path.join(workdir, 'process/dark_stacked.fit.fz')):
 		print('master dark exists, skipping')
@@ -81,7 +75,6 @@ def master_dark(dark_dir, process_dir):
 		siril.cmd(f"convert dark -out={process_dir}")
 		siril.cmd(f"cd {process_dir}")
 		siril.cmd(f"stack dark rej 3 3 -nonorm")
-
 
 def light(light_dir, process_dir):
 	if os.path.exists(os.path.join(workdir, 'process/pp_light_.seq')):
@@ -94,7 +87,6 @@ def light(light_dir, process_dir):
 		siril.cmd(
 			f"calibrate light -dark=dark_stacked -flat=pp_flat_stacked -cc=dark -cfa -equalize_cfa")
 
-
 def light_nc(light_dir, process_dir):
 	if os.path.exists(os.path.join(workdir, 'process/pp_light_.seq')):
 		print('pp_light exists, skipping')
@@ -103,7 +95,6 @@ def light_nc(light_dir, process_dir):
 		siril.cmd(f"cd {light_dir}")
 		siril.cmd(f"convert pp_light -out={process_dir}")
 
-
 def bkg_extract(process_dir):
 	if os.path.exists(os.path.join(workdir, 'process/bkg_pp_light_.seq')):
 		print('background extracted, skipping')
@@ -111,7 +102,6 @@ def bkg_extract(process_dir):
 	else:
 		siril.cmd(f"cd {process_dir}")
 		siril.cmd(f"seqsubsky pp_light 1 -samples=10")
-
 
 def platesolve(process_dir):
 	if args.bkg:
@@ -128,7 +118,6 @@ def platesolve(process_dir):
 	else:
 		focal = (f"-focal={args.platesolve}")		
 	siril.cmd(f"seqplatesolve {light_seq} -nocache -catalog=nomad -force -disto=ps_distortion {focal}")
-
 
 def register(process_dir):
 	siril.cmd(f"cd {process_dir}")
@@ -154,7 +143,6 @@ def stack(process_dir):
 # ==============================================================================
 # GUI Mode
 # ==============================================================================
-
 
 def run_gui():
 	if 'QApplication' not in globals():
@@ -193,7 +181,6 @@ def run_gui():
 			self.feather_input = QLineEdit("0")
 			form_layout.addRow("Feathering (px):", self.feather_input)
 
-
 			self.drizzle = QCheckBox("Drizzle (scale), enable for OSC")
 			self.drizzle_input = QLineEdit("1")
 			self.drizzle_input.setEnabled(False)
@@ -205,9 +192,6 @@ def run_gui():
 			self.bkg_extract_cb = QCheckBox("Extract Background")
 			form_layout.addRow(self.bkg_extract_cb)
 
-			self.no_calibration_cb = QCheckBox("No Calibration")
-			form_layout.addRow(self.no_calibration_cb)
-
 			self.platesolve_cb = QCheckBox("Platesolve, optionally provide focal lenght")
 			self.platesolve_input = QLineEdit()
 			self.platesolve_input.setEnabled(False)
@@ -215,6 +199,20 @@ def run_gui():
 			platesolve_layout = QHBoxLayout()
 			platesolve_layout.addWidget(self.platesolve_input)
 			form_layout.addRow(self.platesolve_cb, platesolve_layout)
+
+			self.no_calibration_cb = QCheckBox("No Calibration")
+			form_layout.addRow(self.no_calibration_cb)
+
+			self.multi_cb = QCheckBox("Multi session calibration")
+			self.multi_input = QTextEdit()
+			self.multi_input.setFixedHeight(100)
+			default_text = "Add working directories here"
+			self.multi_input.setPlainText(default_text)
+			self.multi_input.setEnabled(False)
+			self.multi_cb.toggled.connect(self.multi_input.setEnabled)
+			multi_layout = QHBoxLayout()
+			multi_layout.addWidget(self.multi_input)
+			form_layout.addRow(self.multi_cb, multi_layout)
 
 			layout.addLayout(form_layout)
 
@@ -234,16 +232,57 @@ def run_gui():
 				"feather": self.feather_input.text(),
 				"drizzle": self.drizzle_input.text() if self.drizzle.isChecked() else None,
 				"bkg_extract": self.bkg_extract_cb.isChecked(),
-				"no_calibration": self.no_calibration_cb.isChecked(),
 				"platesolve": self.platesolve_input.text() if self.platesolve_cb.isChecked() and self.platesolve_input.text() else self.platesolve_cb.isChecked(),
+				"no_calibration": self.no_calibration_cb.isChecked(),
+				"multi": shlex.split(self.multi_input.toPlainText()) if self.multi_cb.isChecked() else False,
 			}
 
 	app = QApplication.instance() or QApplication(sys.argv)
+	
+	dark_stylesheet = """
+		QWidget {
+			background-color: #2b2b2b;
+			color: #efefef;
+		}
+		QLineEdit, QTextEdit {
+			background-color: #3b3b3b;
+			color: #efefef;
+			border: 1px solid #555;
+			padding: 2px;
+		}
+		QPushButton {
+			background-color: #4b4b4b;
+			color: #efefef;
+			border: 1px solid #555;
+			padding: 5px;
+			border-radius: 3px;
+		}
+		QPushButton:hover {
+			background-color: #5b5b5b;
+		}
+		QPushButton:pressed {
+			background-color: #3b3b3b;
+		}
+		QCheckBox {
+			spacing: 5px;
+		}
+		QCheckBox::indicator {
+			width: 15px;
+			height: 15px;
+			background-color: #3b3b3b;
+			border: 1px solid #555;
+		}
+		QCheckBox::indicator:checked {
+			background-color: #4b9ee3;
+		}
+	"""
+	app.setStyleSheet(dark_stylesheet)
+
 	dialog = PreprocessingDialog()
 	if dialog.exec():
 		values = dialog.get_values()
-
 		cli_args = []
+
 		if values["workdir"]:
 			cli_args.extend(["-d", values["workdir"]])
 		if values["background"]:
@@ -260,13 +299,20 @@ def run_gui():
 			cli_args.extend(["-z", values["drizzle"]])
 		if values["bkg_extract"]:
 			cli_args.append("-bg")
-		if values["no_calibration"]:
-			cli_args.append("-nc")
 		if values["platesolve"]:
 			cli_args.append("-ps")
 			if isinstance(values["platesolve"], str):
 				cli_args.append(values["platesolve"])
+		if values["no_calibration"]:
+			cli_args.append("-nc")
+		if values["multi"]:
+			cli_args.append("-m")
+			if isinstance(values["multi"], list):
+				cli_args.extend(values["multi"])
+			elif isinstance(values["multi"], str):
+				cli_args.append(values["multi"])
 
+		print(*cli_args)
 		main_logic(cli_args)
 
 		msg_box = QMessageBox()
@@ -274,7 +320,6 @@ def run_gui():
 		msg_box.setText("Processing finished.")
 		msg_box.setWindowTitle("Success")
 		msg_box.exec()
-
 
 def main_logic(argv):
 	global args, workdir, bkg, stars, roundf, wfwhm, drizzle, drizzle_scale, feather, light_seq
@@ -284,6 +329,7 @@ def main_logic(argv):
 	parser.add_argument("-bg", "--bkg", help="extract background", action="store_true")
 	parser.add_argument("-d", "--workdir", nargs='+', help="set working directory")
 	parser.add_argument("-f", "--feather", nargs='+', help="set feathering amount in px")
+	parser.add_argument("-m","--multi_session", nargs='+', help="Calibrates multiple sessions, provide working directory for each session")	
 	parser.add_argument("-nc", "--no_calibration", help="do not calibrate", action="store_true")
 	parser.add_argument("-ps", "--platesolve", nargs='?', const=True, help="platesolve, optionally provide focal lenght")
 	parser.add_argument("-r", "--round", nargs='+',	help="round filter settings, XX%% or X")
@@ -311,13 +357,47 @@ def main_logic(argv):
 		workdir = args.workdir[0] if args.workdir else os.getcwd()
 		siril.cmd("cd", workdir)
 		process_dir = os.path.join(workdir, 'process')
-		if not os.path.exists(process_dir):
-			os.makedirs(process_dir)
-
 		siril.cmd("set32bits")
 		siril.cmd("setext", "fit")
+
 		if args.no_calibration:
 			light_nc(os.path.join(workdir, 'lights'), process_dir)
+
+		elif args.multi_session:
+			w = 0
+			n = len (args.multi_session)
+			while n > w:
+				workdir = args.multi_session[w]
+				if not os.path.exists(workdir):
+					print (f"Directory {workdir} not found")
+					sys.exit(1)
+				w +=1
+			w = 0
+			while n > w:
+				workdir = args.multi_session[w]
+				process_dir = os.path.join(workdir, 'process')
+				master_bias(os.path.join(workdir, 'biases'), process_dir)
+				master_flat(os.path.join(workdir, 'flats'), process_dir)
+				master_dark(os.path.join(workdir, 'darks'), process_dir)
+				light(os.path.join(workdir, 'lights'), process_dir)
+				if w > 0:
+					# find highest pp_light in 1st working directory/process
+					for pp in os.listdir(os.path.join(args.multi_session[0], 'process')):
+						if pp.startswith('pp_light_') and pp.endswith('.fit'):
+							next = int(pp.split('_')[-1].split('.')[0])
+					next += 1
+					print(f"pp_light_{next}.fit")
+					for pp in os.listdir(process_dir):
+						if pp.startswith('pp_light_') and pp.endswith('.fit'):
+							new = f"pp_light_{next:05}.fit"
+							oldpath = os.path.join(args.multi_session[w], 'process', pp)
+							newpath = os.path.join(args.multi_session[0], 'process', new)
+							os.rename(oldpath, newpath)
+							next += 1
+				w +=1
+			workdir = args.multi_session[0]
+			process_dir = os.path.join(workdir, 'process')
+
 		else:
 			master_bias(os.path.join(workdir, 'biases'), process_dir)
 			master_flat(os.path.join(workdir, 'flats'), process_dir)
@@ -333,6 +413,7 @@ def main_logic(argv):
 		register(process_dir)
 		stack(process_dir)
 		siril.cmd("cd", workdir)
+
 	except Exception as e:
 		print("\n**** ERROR *** " + str(e) + "\n")
 		if 'QApplication' in globals() and QApplication.instance():
@@ -342,7 +423,6 @@ def main_logic(argv):
 			msg_box.setInformativeText(str(e))
 			msg_box.setWindowTitle("Error")
 			msg_box.exec()
-
 
 if __name__ == '__main__':
 	siril = s.SirilInterface()
