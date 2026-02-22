@@ -180,6 +180,21 @@ def denoise_GraX(workdir):
 			siril.cmd("save", newimage)
 			processed_images.append(f"{image}")
 
+def multiprocess(workdir):
+	os.chdir(workdir)
+	base_directory = 'processed_' 
+	index = 1
+	while True:
+	    path = f"{base_directory}{index}"
+	    if os.path.isdir(path):
+	        index += 1  # Increment the index for the next iteration
+	    else:
+	        os.makedirs(f"{base_directory}{index}")
+	        break
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in original_images:
+			shutil.move(image, (f"{workdir}/{base_directory}{index}"))
+
 def sharpen(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
@@ -289,7 +304,7 @@ def spcc(workdir):
 #			os.remove(image)
 			processed_images.append(f"{image}")
 
-def stretch(workdir):
+def statstretch(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
@@ -381,6 +396,9 @@ def run_gui():
 			denoise_grax_layout.addWidget(self.denoise_grax_strength)
 			form_layout.addRow(self.denoise_grax_cb, denoise_grax_layout)
 
+			self.multiprocess_cb = QCheckBox("Multiprocess")
+			form_layout.addRow(self.multiprocess_cb)
+			
 			self.sharpen_cb = QCheckBox("Siril Sharpen (Deconvolution)")
 			form_layout.addRow(self.sharpen_cb)
 
@@ -478,94 +496,89 @@ def run_gui():
 				"denoise": self.denoise_cb.isChecked(),
 				"denoiseCC": [self.denoise_cc_mode.currentText(), self.denoise_cc_strength.text()] if self.denoise_cc_cb.isChecked() else None,
 				"denoiseGraX": self.denoise_grax_strength.text() if self.denoise_grax_cb.isChecked() else None,
+				"multiprocess": self.multiprocess_cb.isChecked(),
 				"sharpen": self.sharpen_cb.isChecked(),
 				"sharpenCC": [self.sharpen_cc_mode.currentText(), self.sharpen_cc_stellar_amount.text(), self.sharpen_cc_non_stellar_amount.text(), self.sharpen_cc_non_stellar_strength.text()] if self.sharpen_cc_cb.isChecked() else None,
 				"sharpenGraX": [self.sharpen_grax_mode.currentText(), self.sharpen_grax_strength.text()] if self.sharpen_grax_cb.isChecked() else None,
 				"autostretch": self.autostretch_cb.isChecked(),				
-				"stretch": [self.stretch_hdr_amount.text(), self.stretch_hdr_knee.text(), self.stretch_boost_amount.text()] if self.stretch_cb.isChecked() else None,
+				"statstretch": [self.stretch_hdr_amount.text(), self.stretch_hdr_knee.text(), self.stretch_boost_amount.text()] if self.stretch_cb.isChecked() else None,
 			}
 
 	app = QApplication.instance() or QApplication(sys.argv)
+
+	dark_stylesheet = """
+		QWidget {
+			background-color: #2b2b2b;
+			color: #efefef;
+		}
+		QLineEdit, QTextEdit, QComboBox {
+			background-color: #3b3b3b;
+			color: #efefef;
+			border: 1px solid #555;
+			padding: 2px;
+		}
+		QPushButton {
+			background-color: #4b4b4b;
+			color: #efefef;
+			border: 1px solid #555;
+			padding: 5px;
+			border-radius: 3px;
+		}
+		QPushButton:hover {
+			background-color: #5b5b5b;
+		}
+		QPushButton:pressed {
+			background-color: #3b3b3b;
+		}
+		QCheckBox {
+			spacing: 5px;
+		}
+		QCheckBox::indicator {
+			width: 15px;
+			height: 15px;
+			background-color: #3b3b3b;
+			border: 1px solid #555;
+		}
+		QCheckBox::indicator:checked {
+			background-color: #4b9ee3;
+		}
+	"""
+	app.setStyleSheet(dark_stylesheet)
+
 	dialog = ProcessingDialog()
 	if dialog.exec():
 		values = dialog.get_values()
+		cli_args = []		
 		
-		workdir = values["workdir"]
-		
-		try:
-			siril.connect()
-			siril.cmd("requires", "1.3.6")
-			siril.log("Running processing from GUI")
-			siril.cmd("cd", workdir)
-			siril.cmd("set32bits")
-			siril.cmd("setext", "fit")
-		except Exception as e:
-			msg_box = QMessageBox()
-			msg_box.setIcon(QMessageBox.Icon.Critical)
-			msg_box.setText("Siril connection error")
-			msg_box.setInformativeText(str(e))
-			msg_box.setWindowTitle("Error")
-			msg_box.exec()
-			return
-
-		global npoints, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount
-		
+		if values["workdir"]:
+			cli_args.extend(["-d", values["workdir"]])
 		if values["abe"]:
-			npoints = values["abe"][0]
-			polydegree = values["abe"][1]
-			rbfsmooth = values["abe"][2]			
-			abe(workdir)		
-
+			cli_args.extend(["-ab", values["abe"][0], values["abe"][1], values["abe"][2]])		
 		if values["bkg"]:
-			smooth = values["bkg"]
-			bkg(workdir)
-
+			cli_args.extend(["-b", values["bkg"]])
 		if values["bkgGraX"]:
-			bkgGraX = values["bkgGraX"]
-			bkg_GraX(workdir)
-
+			cli_args.extend(["-bg", values["bkgGraX"]])
 		if values["denoise"]:
-			denoise(workdir)
-
+			cli_args.append("-ds")
 		if values["denoiseCC"]:
-			denoiseCC_mode = values["denoiseCC"][0]
-			denoiseCC_strength = values["denoiseCC"][1]
-			denoise_CC(workdir)
-			
+			cli_args.extend(["-dc", values["denoiseCC"][0], values["denoiseCC"][1]])	
 		if values["denoiseGraX"]:
-			denoiseGraX = values["denoiseGraX"]
-			denoise_GraX(workdir)
-				
+			cli_args.extend(["-dg", values["denoiseGraX"]])
 		if values["sharpen"]:
-			sharpen(workdir)
-
+			cli_args.append("-s")
 		if values["sharpenCC"]:
-			sharpenCC_mode = values["sharpenCC"][0]
-			sharpenCC_stellar_amount = values["sharpenCC"][1] if values["sharpenCC"][1] else None
-			sharpenCC_non_stellar_amount = values["sharpenCC"][2] if values["sharpenCC"][2] else None
-			sharpenCC_non_stellar_strength = values["sharpenCC"][3] if values["sharpenCC"][3] else None
-
-			if sharpenCC_mode == 'Stellar Only':
-				sharpenCC_non_stellar_amount = 0
-				sharpenCC_non_stellar_strength = 0
-			elif sharpenCC_mode == 'Non-Stellar Only':
-				sharpenCC_stellar_amount = 0
-
-			sharpen_CC(workdir)
-
+			cli_args.extend(["-sc", values["sharpenCC"][0], values["sharpenCC"][1], values["sharpenCC"][2], values["sharpenCC"][3]])
 		if values["sharpenGraX"]:
-			sharpenGraX_mode = values["sharpenGraX"][0]
-			sharpenGraX_strength = values["sharpenGraX"][1]
-			sharpen_GraX(workdir)
-
+			cli_args.extend(["-sg", values["sharpenGraX"][0], values["sharpenGraX"][1]])
 		if values["autostretch"]:
-			autostretch(workdir)
-			
-		if values["stretch"]:
-			stretch_hdr_amount = values["stretch"][0]
-			stretch_hdr_knee = values["stretch"][1]
-			stretch_boost_amount = values["stretch"][2]			
-			stretch(workdir)		
+			cli_args.append("-as")
+		if values["statstretch"]:
+			cli_args.extend(["-ss", values["statstretch"][0], values["statstretch"][1], values["statstretch"][2]])
+		if values["multiprocess"]:
+			cli_args.append("-m")
+
+		print(*cli_args)
+		main_logic(cli_args)
 
 		msg_box = QMessageBox()
 		msg_box.setIcon(QMessageBox.Icon.Information)
@@ -577,7 +590,9 @@ def run_gui():
 # Main execution
 # ==============================================================================	
 
-if __name__ == '__main__':
+def main_logic(argv):
+	global args, npoints, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount
+	
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-ab","--abe", nargs='+', action='append', help="AutoBGE, provide npoints, polydegree and rbfsmooth")
 	parser.add_argument("-as","--autostretch", help="Siril autostretch (linked)" ,action="store_true")
@@ -588,28 +603,21 @@ if __name__ == '__main__':
 	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
 	parser.add_argument("-dc","--denoiseCC", nargs='+', action='append', help="run CC denoise, provide mode (luminance, full, separate) and denoise strength 0.0-1.0")
 	parser.add_argument("-dg","--denoiseGraX", nargs='+', action='append', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
-	parser.add_argument("-m","--multiprocess", help="saves images under processed directory" ,action="store_true")	
+	parser.add_argument("-m","--multiprocess", help="saves processed images in processed_N directory" ,action="store_true")	
 	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
 	parser.add_argument("-sc","--sharpenCC", nargs='+', action='append' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
 	parser.add_argument("-ss","--statstretch", nargs='+', action='append', help="statistical stretch, provide HDR amount, HDR knee and boost amount")
+	args = parser.parse_args(argv)
 	
-	siril = s.SirilInterface()
-
-	if len(sys.argv) == 1:
-		run_gui()
-	else:
-		args = parser.parse_args()
-		try:
-			siril.connect()
-			siril.cmd("requires", "1.3.6")	
-			siril.log("Running processing")
-			workdir = args.workdir[0] if args.workdir else os.getcwd()	
-			siril.cmd("cd", workdir)
-			siril.cmd("set32bits")
-			siril.cmd("setext", "fit")
-		except Exception as e :
-			print("\n**** ERROR *** " +  str(e) + "\n" )
+	try:
+		siril.connect()
+		siril.cmd("requires", "1.3.6")	
+		siril.log("Running processing")
+		workdir = args.workdir[0] if args.workdir else os.getcwd()	
+		siril.cmd("cd", workdir)
+		siril.cmd("set32bits")
+		siril.cmd("setext", "fit")
 
 		os.chdir(workdir)
 		for image in os.listdir():
@@ -695,23 +703,29 @@ if __name__ == '__main__':
 			autostretch(workdir)
 		
 		if args.statstretch:
-			for n in args.stretch:
+			for n in args.statstretch:
 				stretch_hdr_amount = (n[0])
 				stretch_hdr_knee = (n[1])
 				stretch_boost_amount = (n[2])
-				stretch(workdir)
+				statstretch(workdir)
 				
 		if args.multiprocess:
-			os.chdir(workdir)
-			base_directory = 'processed_' 
-			index = 1
-			while True:
-			    path = f"{base_directory}{index}"
-			    if os.path.isdir(path):
-			        index += 1  # Increment the index for the next iteration
-			    else:
-			        os.makedirs(f"{base_directory}{index}")
-        			break
-			for image in os.listdir():
-				if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in original_images:
-					shutil.move(image, (f"{workdir}/{base_directory}{index}"))
+			multiprocess(workdir)
+
+	except Exception as e:
+		print("\n**** ERROR *** " + str(e) + "\n")
+		if 'QApplication' in globals() and QApplication.instance():
+			msg_box = QMessageBox()
+			msg_box.setIcon(QMessageBox.Icon.Critical)
+			msg_box.setText("An error occurred during processing.")
+			msg_box.setInformativeText(str(e))
+			msg_box.setWindowTitle("Error")
+			msg_box.exec()
+			
+if __name__ == '__main__':
+	siril = s.SirilInterface()
+
+	if len(sys.argv) == 1:
+		run_gui()
+	else:
+		main_logic(sys.argv[1:])
