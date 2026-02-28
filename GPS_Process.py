@@ -21,7 +21,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 -----
 0.1.4	Initial submittal for merge request
 0.1.5   Adds AutoBGE, Autostretch, Statistical Stretch and Multiple process file handling
-
+0.1.6   Adds SetiAstroPro CC denoise and sharpen. Script now sharpens before denoise. 
 """
 
 import sys
@@ -32,13 +32,13 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 
 # PyQt6 for GUI
 try:
 	from PyQt6.QtWidgets import (
 		QApplication, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox,
-		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox
+		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox, QFrame
 	)
 except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
@@ -180,6 +180,43 @@ def denoise_GraX(workdir):
 			siril.cmd("save", newimage)
 			processed_images.append(f"{image}")
 
+def denoise_SA(workdir):
+	config_dir = siril.get_siril_configdir()
+	if os.path.isfile (f"{config_dir}/sirilcc_saspro.conf"):
+		config_file_path = (f"{config_dir}/sirilcc_saspro.conf")
+		with open(config_file_path, 'r') as file:
+			executable_path = file.readline().strip()
+	else:
+		print("Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory with a line containing the path to setiastrosuitepro.")
+		sys.exit(1)
+		
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log(image)
+			newimage = (f"{(image).rsplit('.', 1)[0]}_dsa-{denoiseSA_mode}-{denoiseSA_luma_amount}-{denoiseSA_color_amount}.fit")
+			cmd = f"{executable_path} cc denoise --gpu --denoise-mode '{denoiseSA_mode}' --denoise-luma {denoiseSA_luma_amount} --denoise-color {denoiseSA_color_amount} --separate-channels -i {image} -o '{newimage}'"
+			print(cmd)
+			
+			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+
+			percent_re = re.compile(r"(\d+\.?\d*)" + "%")
+			if process.stdout:
+				for line in iter(process.stdout.readline, ''):
+					line = line.strip()
+					if not line:
+						continue
+					m = percent_re.search(line)
+					if m:
+						try:
+							pct = float(m.group(1))
+							siril.update_progress(f"Denoise", pct / 100.0)
+						except ValueError:
+							siril.log(line)
+					else:
+							siril.log(line)
+			process.wait()
+			processed_images.append(f"{image}")		
+			
 def multiprocess(workdir):
 	os.chdir(workdir)
 	base_directory = 'processed_' 
@@ -209,7 +246,7 @@ def sharpen(workdir):
 			processed_images.append(f"{image}")
 
 def sharpen_CC(workdir):
-	compress = (siril.get_siril_config('compression','enabled'))# find CosmicClaritySuitepath paths
+	compress = (siril.get_siril_config('compression','enabled'))
 	config_dir = siril.get_siril_configdir()
 	if os.path.isfile (f"{config_dir}/sirilcc_sharpen.conf"):
 		config_file_path = (f"{config_dir}/sirilcc_sharpen.conf")
@@ -254,7 +291,7 @@ def sharpen_CC(workdir):
 					if m:
 						try:
 							pct = float(m.group(1))
-							siril.update_progress(f"Sharpen: {pct:.2f}%", pct / 100.0)
+							siril.update_progress(f"Sharpen", pct / 100.0)
 						except ValueError:
 							siril.log(line)
 					else:
@@ -271,6 +308,43 @@ def sharpen_CC(workdir):
 				processed_images.append(f"{image}")		
 			os.chdir(workdir)
 
+def sharpen_SA(workdir):
+	config_dir = siril.get_siril_configdir()
+	if os.path.isfile (f"{config_dir}/sirilcc_saspro.conf"):
+		config_file_path = (f"{config_dir}/sirilcc_saspro.conf")
+		with open(config_file_path, 'r') as file:
+			executable_path = file.readline().strip()
+	else:
+		print("Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory with a line containing the path to setiastrosuitepro.")
+		sys.exit(1)
+		
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log(image)
+			newimage = (f"{(image).rsplit('.', 1)[0]}_ssa-{sharpenSA_mode.rsplit( )[0]}-{sharpenSA_non_stellar_amount}-{sharpenSA_stellar_amount}.fit")
+			cmd = f"{executable_path} cc sharpen --gpu --sharpening-mode '{sharpenSA_mode}' --nonstellar-amount {sharpenSA_non_stellar_amount} --stellar-amount {sharpenSA_stellar_amount} --auto-psf -i {image} -o '{newimage}'"
+			print(cmd)
+			
+			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+
+			percent_re = re.compile(r"(\d+\.?\d*)" + "%")
+			if process.stdout:
+				for line in iter(process.stdout.readline, ''):
+					line = line.strip()
+					if not line:
+						continue
+					m = percent_re.search(line)
+					if m:
+						try:
+							pct = float(m.group(1))
+							siril.update_progress(f"Sharpen: {pct:.2f}%", pct / 100.0)
+						except ValueError:
+							siril.log(line)
+					else:
+							siril.log(line)
+			process.wait()
+			processed_images.append(f"{image}")		
+			
 def sharpen_GraX(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
@@ -369,36 +443,10 @@ def run_gui():
 			bkg_grax_layout.addWidget(self.bkg_grax_smooth)
 			form_layout.addRow(self.bkg_grax_cb, bkg_grax_layout)
 
-			self.denoise_cb = QCheckBox("Siril Denoise (denoise -indep -vst)")
-			form_layout.addRow(self.denoise_cb)
-			
-			self.denoise_cc_cb = QCheckBox("Cosmic Clarity Denoise")
-			self.denoise_cc_mode = QComboBox()
-			self.denoise_cc_mode.addItems(['full', 'luminance', 'separate'])
-			self.denoise_cc_strength = QLineEdit("0.5")
-			self.denoise_cc_mode.setEnabled(False)
-			self.denoise_cc_strength.setEnabled(False)
-			self.denoise_cc_cb.toggled.connect(self.denoise_cc_mode.setEnabled)
-			self.denoise_cc_cb.toggled.connect(self.denoise_cc_strength.setEnabled)
-			denoise_cc_layout = QHBoxLayout()
-			denoise_cc_layout.addWidget(QLabel("Mode:"))
-			denoise_cc_layout.addWidget(self.denoise_cc_mode)
-			denoise_cc_layout.addWidget(QLabel("Strength:"))
-			denoise_cc_layout.addWidget(self.denoise_cc_strength)
-			form_layout.addRow(self.denoise_cc_cb, denoise_cc_layout)
+			blank_line = QFrame()
+			blank_line.setFixedHeight(10)  # Adjust height as needed
+			form_layout.addRow(blank_line) 
 
-			self.denoise_grax_cb = QCheckBox("GraXpert Denoise")
-			self.denoise_grax_strength = QLineEdit("0.5")
-			self.denoise_grax_strength.setEnabled(False)
-			self.denoise_grax_cb.toggled.connect(self.denoise_grax_strength.setEnabled)
-			denoise_grax_layout = QHBoxLayout()
-			denoise_grax_layout.addWidget(QLabel("Strength:"))
-			denoise_grax_layout.addWidget(self.denoise_grax_strength)
-			form_layout.addRow(self.denoise_grax_cb, denoise_grax_layout)
-
-			self.multiprocess_cb = QCheckBox("Multiprocess")
-			form_layout.addRow(self.multiprocess_cb)
-			
 			self.sharpen_cb = QCheckBox("Siril Sharpen (Deconvolution)")
 			form_layout.addRow(self.sharpen_cb)
 
@@ -429,6 +477,28 @@ def run_gui():
 			sharpen_cc_layout.addWidget(self.sharpen_cc_non_stellar_strength)
 			form_layout.addRow(self.sharpen_cc_cb, sharpen_cc_layout)
 
+			self.sharpen_ssa_cb = QCheckBox("Setiastro CC Sharpen")
+			self.sharpen_ssa_mode = QComboBox()
+			self.sharpen_ssa_mode.addItems(['Both', 'Stellar Only' ,'Non-Stellar Only'])
+			self.sharpen_ssa_stellar_amount = QLineEdit("0.5")
+			self.sharpen_ssa_non_stellar_amount = QLineEdit("0.5")
+			self.sharpen_ssa_mode.setEnabled(False)
+			self.sharpen_ssa_stellar_amount.setEnabled(False)
+			self.sharpen_ssa_non_stellar_amount.setEnabled(False)
+			self.sharpen_ssa_cb.toggled.connect(self.sharpen_ssa_mode.setEnabled)
+			self.sharpen_ssa_cb.toggled.connect(self.sharpen_ssa_stellar_amount.setEnabled)
+			self.sharpen_ssa_cb.toggled.connect(self.sharpen_ssa_non_stellar_amount.setEnabled)
+			self.sharpen_ssa_mode.currentTextChanged.connect(self.update_sharpen_ssa_options)
+			self.update_sharpen_ssa_options(self.sharpen_ssa_mode.currentText())
+			sharpen_ssa_layout = QHBoxLayout()
+			sharpen_ssa_layout.addWidget(QLabel("Mode:"))
+			sharpen_ssa_layout.addWidget(self.sharpen_ssa_mode)
+			sharpen_ssa_layout.addWidget(QLabel("Stellar Amount:"))
+			sharpen_ssa_layout.addWidget(self.sharpen_ssa_stellar_amount)
+			sharpen_ssa_layout.addWidget(QLabel("Non-Stellar Amount:"))
+			sharpen_ssa_layout.addWidget(self.sharpen_ssa_non_stellar_amount)
+			form_layout.addRow(self.sharpen_ssa_cb, sharpen_ssa_layout)
+			
 			self.sharpen_grax_cb = QCheckBox("GraXpert Sharpen")
 			self.sharpen_grax_mode = QComboBox()
 			self.sharpen_grax_mode.addItems(['both', 'object' ,'stellar'])
@@ -443,6 +513,61 @@ def run_gui():
 			sharpen_grax_layout.addWidget(QLabel("Strength:"))
 			sharpen_grax_layout.addWidget(self.sharpen_grax_strength)	
 			form_layout.addRow(self.sharpen_grax_cb, sharpen_grax_layout)
+
+			blank_line = QFrame()
+			blank_line.setFixedHeight(10)  # Adjust height as needed
+			form_layout.addRow(blank_line) 
+						
+			self.denoise_cb = QCheckBox("Siril Denoise (denoise -indep -vst)")
+			form_layout.addRow(self.denoise_cb)
+			
+			self.denoise_cc_cb = QCheckBox("Cosmic Clarity Denoise")
+			self.denoise_cc_mode = QComboBox()
+			self.denoise_cc_mode.addItems(['full', 'luminance', 'separate'])
+			self.denoise_cc_strength = QLineEdit("0.5")
+			self.denoise_cc_mode.setEnabled(False)
+			self.denoise_cc_strength.setEnabled(False)
+			self.denoise_cc_cb.toggled.connect(self.denoise_cc_mode.setEnabled)
+			self.denoise_cc_cb.toggled.connect(self.denoise_cc_strength.setEnabled)
+			denoise_cc_layout = QHBoxLayout()
+			denoise_cc_layout.addWidget(QLabel("Mode:"))
+			denoise_cc_layout.addWidget(self.denoise_cc_mode)
+			denoise_cc_layout.addWidget(QLabel("Strength:"))
+			denoise_cc_layout.addWidget(self.denoise_cc_strength)
+			form_layout.addRow(self.denoise_cc_cb, denoise_cc_layout)
+
+			self.denoise_dsa_cb = QCheckBox("Setiastro CC Denoise")
+			self.denoise_dsa_mode = QComboBox()
+			self.denoise_dsa_mode.addItems(['full', 'luminance'])
+			self.denoise_dsa_luma_amount = QLineEdit("0.5")
+			self.denoise_dsa_color_amount = QLineEdit("0.5")			
+			self.denoise_dsa_mode.setEnabled(False)
+			self.denoise_dsa_luma_amount.setEnabled(False)
+			self.denoise_dsa_color_amount.setEnabled(False)			
+			self.denoise_dsa_cb.toggled.connect(self.denoise_dsa_mode.setEnabled)
+			self.denoise_dsa_cb.toggled.connect(self.denoise_dsa_luma_amount.setEnabled)
+			self.denoise_dsa_cb.toggled.connect(self.denoise_dsa_color_amount.setEnabled)			
+			denoise_dsa_layout = QHBoxLayout()
+			denoise_dsa_layout.addWidget(QLabel("Mode:"))
+			denoise_dsa_layout.addWidget(self.denoise_dsa_mode)
+			denoise_dsa_layout.addWidget(QLabel("Luma amount:"))
+			denoise_dsa_layout.addWidget(self.denoise_dsa_luma_amount)
+			denoise_dsa_layout.addWidget(QLabel("Color amount:"))
+			denoise_dsa_layout.addWidget(self.denoise_dsa_color_amount)			
+			form_layout.addRow(self.denoise_dsa_cb, denoise_dsa_layout)
+
+			self.denoise_grax_cb = QCheckBox("GraXpert Denoise")
+			self.denoise_grax_strength = QLineEdit("0.5")
+			self.denoise_grax_strength.setEnabled(False)
+			self.denoise_grax_cb.toggled.connect(self.denoise_grax_strength.setEnabled)
+			denoise_grax_layout = QHBoxLayout()
+			denoise_grax_layout.addWidget(QLabel("Strength:"))
+			denoise_grax_layout.addWidget(self.denoise_grax_strength)
+			form_layout.addRow(self.denoise_grax_cb, denoise_grax_layout)
+
+			blank_line = QFrame()
+			blank_line.setFixedHeight(10)  # Adjust height as needed
+			form_layout.addRow(blank_line) 
 
 			self.autostretch_cb = QCheckBox("Autostretch (linked)")
 			form_layout.addRow(self.autostretch_cb)
@@ -466,6 +591,9 @@ def run_gui():
 			stretch_layout.addWidget(self.stretch_boost_amount)
 			form_layout.addRow(self.stretch_cb, stretch_layout)
 
+			self.multiprocess_cb = QCheckBox("Multiprocess")
+			form_layout.addRow(self.multiprocess_cb)
+
 			layout.addLayout(form_layout)
 
 			self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -487,6 +615,17 @@ def run_gui():
 				self.sharpen_cc_non_stellar_amount.setEnabled(True)
 				self.sharpen_cc_non_stellar_strength.setEnabled(True)
 
+		def update_sharpen_ssa_options(self, mode):
+			if mode == 'Both':
+				self.sharpen_ssa_stellar_amount.setEnabled(True)
+				self.sharpen_ssa_non_stellar_amount.setEnabled(True)
+			elif mode == 'Stellar Only':
+				self.sharpen_ssa_stellar_amount.setEnabled(True)
+				self.sharpen_ssa_non_stellar_amount.setEnabled(False)
+			elif mode == 'Non-Stellar Only':
+				self.sharpen_ssa_stellar_amount.setEnabled(False)
+				self.sharpen_ssa_non_stellar_amount.setEnabled(True)
+
 		def get_values(self):
 			return {
 				"workdir": self.workdir_input.text(),
@@ -495,11 +634,13 @@ def run_gui():
 				"bkgGraX": self.bkg_grax_smooth.text() if self.bkg_grax_cb.isChecked() else None,
 				"denoise": self.denoise_cb.isChecked(),
 				"denoiseCC": [self.denoise_cc_mode.currentText(), self.denoise_cc_strength.text()] if self.denoise_cc_cb.isChecked() else None,
+				"denoiseSA": [self.denoise_dsa_mode.currentText(), self.denoise_dsa_luma_amount.text(), self.denoise_dsa_color_amount.text()] if self.denoise_dsa_cb.isChecked() else None,
 				"denoiseGraX": self.denoise_grax_strength.text() if self.denoise_grax_cb.isChecked() else None,
 				"multiprocess": self.multiprocess_cb.isChecked(),
 				"sharpen": self.sharpen_cb.isChecked(),
 				"sharpenCC": [self.sharpen_cc_mode.currentText(), self.sharpen_cc_stellar_amount.text(), self.sharpen_cc_non_stellar_amount.text(), self.sharpen_cc_non_stellar_strength.text()] if self.sharpen_cc_cb.isChecked() else None,
 				"sharpenGraX": [self.sharpen_grax_mode.currentText(), self.sharpen_grax_strength.text()] if self.sharpen_grax_cb.isChecked() else None,
+				"sharpenSA": [self.sharpen_ssa_mode.currentText(), self.sharpen_ssa_stellar_amount.text(), self.sharpen_ssa_non_stellar_amount.text()] if self.sharpen_ssa_cb.isChecked() else None,
 				"autostretch": self.autostretch_cb.isChecked(),				
 				"statstretch": [self.stretch_hdr_amount.text(), self.stretch_hdr_knee.text(), self.stretch_boost_amount.text()] if self.stretch_cb.isChecked() else None,
 			}
@@ -562,12 +703,16 @@ def run_gui():
 			cli_args.append("-ds")
 		if values["denoiseCC"]:
 			cli_args.extend(["-dc", values["denoiseCC"][0], values["denoiseCC"][1]])	
+		if values["denoiseSA"]:
+			cli_args.extend(["-dsa", values["denoiseSA"][0], values["denoiseSA"][1], values["denoiseSA"][2]])
 		if values["denoiseGraX"]:
 			cli_args.extend(["-dg", values["denoiseGraX"]])
 		if values["sharpen"]:
 			cli_args.append("-s")
 		if values["sharpenCC"]:
 			cli_args.extend(["-sc", values["sharpenCC"][0], values["sharpenCC"][1], values["sharpenCC"][2], values["sharpenCC"][3]])
+		if values["sharpenSA"]:
+			cli_args.extend(["-ssa", values["sharpenSA"][0], values["sharpenSA"][1], values["sharpenSA"][2]])		
 		if values["sharpenGraX"]:
 			cli_args.extend(["-sg", values["sharpenGraX"][0], values["sharpenGraX"][1]])
 		if values["autostretch"]:
@@ -591,7 +736,7 @@ def run_gui():
 # ==============================================================================	
 
 def main_logic(argv):
-	global args, npoints, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount
+	global args, npoints, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-ab","--abe", nargs='+', action='append', help="AutoBGE, provide npoints, polydegree and rbfsmooth")
@@ -600,13 +745,16 @@ def main_logic(argv):
 	parser.add_argument("-bg","--bkgGraX", nargs='+', action='append', help="GraXpert background extraction, provide smoothing 0.0-1.0")
 	parser.add_argument("-cc","--spcc", nargs='+', help="spcc color calibration, provide sensor and filter(s) OSC or R, G & B, using quotes")
 	parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
-	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
+
 	parser.add_argument("-dc","--denoiseCC", nargs='+', action='append', help="run CC denoise, provide mode (luminance, full, separate) and denoise strength 0.0-1.0")
 	parser.add_argument("-dg","--denoiseGraX", nargs='+', action='append', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
+	parser.add_argument("-dsa","--denoiseSA", nargs='+', action='append' ,help="run SASpro CC denoise, provide mode (full or luminance), luminance denoise strength (0.0-1.0) and color denoise strength (0.0-1.0)")
+	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
 	parser.add_argument("-m","--multiprocess", help="saves processed images in processed_N directory" ,action="store_true")	
 	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
 	parser.add_argument("-sc","--sharpenCC", nargs='+', action='append' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
+	parser.add_argument("-ssa","--sharpenSA", nargs='+', action='append' ,help="run SASpro CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount")
 	parser.add_argument("-ss","--statstretch", nargs='+', action='append', help="statistical stretch, provide HDR amount, HDR knee and boost amount")
 	args = parser.parse_args(argv)
 	
@@ -656,20 +804,6 @@ def main_logic(argv):
 				sys.exit(1)
 			spcc(workdir)			
 
-		if args.denoise:
-			denoise(workdir)
-
-		if args.denoiseCC:
-			for n in args.denoiseCC:
-				denoiseCC_mode = (n[0])
-				denoiseCC_strength = (n[1])
-				denoise_CC(workdir)
-			
-		if args.denoiseGraX:
-			for n in args.denoiseGraX:
-				denoiseGraX = (n[0])
-				denoise_GraX(workdir)
-
 		if args.sharpen:
 			sharpen(workdir)
 			
@@ -698,7 +832,45 @@ def main_logic(argv):
 				sharpenGraX_mode = (n[0])
 				sharpenGraX_strength = (n[1])
 				sharpen_GraX(workdir)
+
+		if args.sharpenSA:
+			for n in args.sharpenSA:			
+				sharpenSA_mode = (n[0])
+				if (n[0]) == 'Both':
+					sharpenSA_stellar_amount = (n[1])
+					sharpenSA_non_stellar_amount = (n[2])	
+				elif (n[0]) == 'Non-Stellar Only':
+					sharpenSA_non_stellar_amount = (n[1])	
+					sharpenSA_stellar_amount = '0'
+				elif (n[0]) == 'Stellar Only':
+					sharpenSA_stellar_amount = (n[1])			
+					sharpenSA_non_stellar_amount = '0'	
+				else:
+					print('Mode needs to be either Both, Stellar Only or Non-Stellar Only')
+					sys.exit(1)
+				sharpen_SA(workdir)
 				
+		if args.denoise:
+			denoise(workdir)
+
+		if args.denoiseCC:
+			for n in args.denoiseCC:
+				denoiseCC_mode = (n[0])
+				denoiseCC_strength = (n[1])
+				denoise_CC(workdir)
+			
+		if args.denoiseSA:
+			for n in args.denoiseSA:
+				denoiseSA_mode = (n[0])
+				denoiseSA_luma_amount = (n[1])
+				denoiseSA_color_amount = (n[2])
+				denoise_SA(workdir)
+
+		if args.denoiseGraX:
+			for n in args.denoiseGraX:
+				denoiseGraX = (n[0])
+				denoise_GraX(workdir)
+
 		if args.autostretch:
 			autostretch(workdir)
 		
