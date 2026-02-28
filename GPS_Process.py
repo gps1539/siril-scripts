@@ -337,7 +337,7 @@ def sharpen_SA(workdir):
 					if m:
 						try:
 							pct = float(m.group(1))
-							siril.update_progress(f"Sharpen: {pct:.2f}%", pct / 100.0)
+							siril.update_progress(f"Sharpen", pct / 100.0)
 						except ValueError:
 							siril.log(line)
 					else:
