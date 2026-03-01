@@ -23,6 +23,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.3	Initial submittal for merge request
 0.1.4   Added nbstars as an optional filter. 
 0.1.5   Adds multi-session support to calibrate each session separately
+0.1.6   Handle working directory with spaces
  
 """
 
@@ -33,7 +34,7 @@ import argparse
 import re
 import shlex
 
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 	
 # PyQt6 for GUI
 try:
@@ -355,6 +356,13 @@ def main_logic(argv):
 		siril.cmd("requires", "1.3.6")
 		siril.log("Running preprocessing")
 		workdir = args.workdir[0] if args.workdir else os.getcwd()
+		# handle working directory with spaces
+		olddir = None
+		if ' ' in os.path.basename(workdir):
+			olddir = workdir
+			workdir = workdir.replace(" ", "_")
+			os.rename(olddir, workdir)
+
 		siril.cmd("cd", workdir)
 		process_dir = os.path.join(workdir, 'process')
 		siril.cmd("set32bits")
@@ -412,7 +420,11 @@ def main_logic(argv):
 			platesolve(process_dir)
 		register(process_dir)
 		stack(process_dir)
-		siril.cmd("cd", workdir)
+		if olddir:
+			os.rename(workdir, olddir)
+			siril.cmd("cd",f'"{olddir}"')
+		else:
+			siril.cmd("cd",f'"{workdir}"')
 
 	except Exception as e:
 		print("\n**** ERROR *** " + str(e) + "\n")
