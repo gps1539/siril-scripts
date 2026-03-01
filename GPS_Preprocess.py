@@ -335,9 +335,14 @@ def main_logic(argv):
 	parser.add_argument("-ps", "--platesolve", nargs='?', const=True, help="platesolve, optionally provide focal lenght")
 	parser.add_argument("-r", "--round", nargs='+',	help="round filter settings, XX%% or X")
 	parser.add_argument("-s", "--stars", nargs='+', help="# of stars filter settings, XX%% or X")
+	parser.add_argument("-v","--version", help="print the version and exit",action="store_true")
 	parser.add_argument("-w", "--wfwhm", nargs='+',	help="wfwhm filter settings, XX%% or X")
 	parser.add_argument("-z", "--drizzle", nargs='+', help="set drizzle scaling, required for OSC images")
 	args = parser.parse_args(argv)
+
+	if args.version:
+		print('version ' + VERSION)
+		sys.exit(1)
 
 	bkg = (args.background[0]) if args.background else '100%'
 	stars = (args.stars[0]) if args.stars else '100%'

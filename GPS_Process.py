@@ -22,7 +22,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.4	Initial submittal for merge request
 0.1.5   Adds AutoBGE, Autostretch, Statistical Stretch and Multiple process file handling
 0.1.6   Adds SetiAstroPro CC denoise and sharpen. Script now sharpens before denoise. 
-0.1.7   Handle working directory with spaces. Show siril config path when config file is missing
+0.1.7   Handle working directory with spaces. Show siril config path when config file is missing.
 """
 
 import sys
@@ -757,7 +757,12 @@ def main_logic(argv):
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
 	parser.add_argument("-ssa","--sharpenSA", nargs='+', action='append' ,help="run SASpro CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount")
 	parser.add_argument("-ss","--statstretch", nargs='+', action='append', help="statistical stretch, provide HDR amount, HDR knee and boost amount")
+	parser.add_argument("-v","--version", help="print the version and exit",action="store_true")
 	args = parser.parse_args(argv)
+
+	if args.version:
+		print('version ' + VERSION)
+		sys.exit(1)
 	
 	try:
 		siril.connect()
