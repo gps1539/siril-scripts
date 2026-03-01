@@ -763,7 +763,7 @@ def main_logic(argv):
 		siril.cmd("requires", "1.3.6")	
 		siril.log("Running processing")
 		workdir = args.workdir[0] if args.workdir else os.getcwd()	
-		siril.cmd("cd", workdir)
+		siril.cmd("cd",f'"{workdir}"')
 		siril.cmd("set32bits")
 		siril.cmd("setext", "fit")
 
