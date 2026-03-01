@@ -22,6 +22,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.4	Initial submittal for merge request
 0.1.5   Adds AutoBGE, Autostretch, Statistical Stretch and Multiple process file handling
 0.1.6   Adds SetiAstroPro CC denoise and sharpen. Script now sharpens before denoise. 
+0.1.7   Handle working directory with spaces. Show siril config path when config file is missing
 """
 
 import sys
@@ -32,7 +33,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 
 # PyQt6 for GUI
 try:
@@ -187,7 +188,7 @@ def denoise_SA(workdir):
 		with open(config_file_path, 'r') as file:
 			executable_path = file.readline().strip()
 	else:
-		print("Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory with a line containing the path to setiastrosuitepro.")
+		print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
 		sys.exit(1)
 		
 	for image in os.listdir():
@@ -315,7 +316,7 @@ def sharpen_SA(workdir):
 		with open(config_file_path, 'r') as file:
 			executable_path = file.readline().strip()
 	else:
-		print("Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory with a line containing the path to setiastrosuitepro.")
+		print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
 		sys.exit(1)
 		
 	for image in os.listdir():
