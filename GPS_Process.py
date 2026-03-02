@@ -172,7 +172,6 @@ def denoise_CC(workdir):
 			os.chdir(workdir)
 	
 def denoise_GraX(workdir):
-	os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 	os.chdir(workdir)
 	for image in os.listdir():
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
@@ -184,6 +183,7 @@ def denoise_GraX(workdir):
 			processed_images.append(f"{image}")
 
 def denoise_SA(workdir):
+	os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 	config_dir = siril.get_siril_configdir()
 	if os.path.isfile (f"{config_dir}/sirilcc_saspro.conf"):
 		config_file_path = (f"{config_dir}/sirilcc_saspro.conf")
