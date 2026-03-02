@@ -23,6 +23,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.5   Adds AutoBGE, Autostretch, Statistical Stretch and Multiple process file handling
 0.1.6   Adds SetiAstroPro CC denoise and sharpen. Script now sharpens before denoise. 
 0.1.7   Handle working directory with spaces. Show siril config path when config file is missing.
+0.1.8   Set Cuda 'expandable_segments:True' for better GPU memory allocation
 """
 
 import sys
@@ -33,7 +34,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 
 # PyQt6 for GUI
 try:
@@ -171,6 +172,7 @@ def denoise_CC(workdir):
 			os.chdir(workdir)
 	
 def denoise_GraX(workdir):
+	os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 	os.chdir(workdir)
 	for image in os.listdir():
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
@@ -310,6 +312,7 @@ def sharpen_CC(workdir):
 			os.chdir(workdir)
 
 def sharpen_SA(workdir):
+	os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 	config_dir = siril.get_siril_configdir()
 	if os.path.isfile (f"{config_dir}/sirilcc_saspro.conf"):
 		config_file_path = (f"{config_dir}/sirilcc_saspro.conf")
