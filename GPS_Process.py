@@ -24,6 +24,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.6   Adds SetiAstroPro CC denoise and sharpen. Script now sharpens before denoise. 
 0.1.7   Handle working directory with spaces. Show siril config path when config file is missing.
 0.1.8   Set Cuda 'expandable_segments:True' for better GPU memory allocation
+0.1.9	SPCC improvements
 """
 
 import sys
@@ -34,7 +35,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.8"
+VERSION = "0.1.9"
 
 # PyQt6 for GUI
 try:
@@ -374,6 +375,7 @@ def spcc(workdir):
 			siril.cmd("load", image)			
 			siril.cmd("platesolve")
 			if Type == 'OSC':
+				print(f'spcc \"-oscsensor={spcc_sensor}\" \"-oscfilter={spcc_oscfilter}\"')
 				siril.cmd(f'spcc \"-oscsensor={spcc_sensor}\" \"-oscfilter={spcc_oscfilter}\"')
 			if Type == 'mono':
 				siril.cmd(f'spcc \"-monosensor={spcc_sensor}\" \"-rfilter={spcc_rfilter}\" \"-gfilter={spcc_gfilter}\" \"-bfilter={spcc_bfilter}\"')
@@ -740,7 +742,7 @@ def run_gui():
 # ==============================================================================	
 
 def main_logic(argv):
-	global args, npoints, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount
+	global args, npoints, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount, spcc_sensor, spcc_oscfilter, spcc_rfilter, spcc_gfilter, spcc_bfilter, Type
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-ab","--abe", nargs='+', action='append', help="AutoBGE, provide npoints, polydegree and rbfsmooth")
