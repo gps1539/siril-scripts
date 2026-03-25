@@ -25,6 +25,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.7   Handle working directory with spaces. Show siril config path when config file is missing.
 0.1.8   Set Cuda 'expandable_segments:True' for better GPU memory allocation
 0.1.9	SPCC improvements
+0.2.0	Adds cropping and better handling of siril and setiastro python version mismatch
 """
 
 import sys
@@ -35,7 +36,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.1.9"
+VERSION = "0.2.0"
 
 # PyQt6 for GUI
 try:
@@ -97,6 +98,22 @@ def bkg_GraX(workdir):
 			newimage = (f"{(image).rsplit('.', 1)[0]}_bg{bkgGraX}")
 			siril.cmd("save", newimage)
 			processed_images.append(f"{image}")
+
+def crop(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			for c in args.crop:
+				siril.log(f"Cropping {image} by {c}%")			
+				siril.cmd("load", image)
+				x_crop = (float(siril.get_image_fits_header(return_as='dict')['NAXIS1']) * (float(c) / 100.0))
+				y_crop = (float(siril.get_image_fits_header(return_as='dict')['NAXIS2']) * (float(c) / 100.0))
+				x = (float(siril.get_image_fits_header(return_as='dict')['NAXIS1']) - (float(x_crop) * 2.0))			
+				y = (float(siril.get_image_fits_header(return_as='dict')['NAXIS2']) - (float(y_crop) * 2.0))
+				siril.cmd(f"crop {x_crop} {y_crop} {x} {y}")
+				newimage = (f"{(image).rsplit('.', 1)[0]}_c{c}")
+				siril.cmd("save", newimage)
+				processed_images.append(f"{image}")				
 
 def denoise(workdir):
 	os.chdir(workdir)
@@ -190,6 +207,7 @@ def denoise_SA(workdir):
 		config_file_path = (f"{config_dir}/sirilcc_saspro.conf")
 		with open(config_file_path, 'r') as file:
 			executable_path = file.readline().strip()
+			python_path = executable_path.replace("setiastrosuitepro", "python")
 	else:
 		print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
 		sys.exit(1)
@@ -198,10 +216,12 @@ def denoise_SA(workdir):
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log(image)
 			newimage = (f"{(image).rsplit('.', 1)[0]}_dsa-{denoiseSA_mode}-{denoiseSA_luma_amount}-{denoiseSA_color_amount}.fit")
-			cmd = f"{executable_path} cc denoise --gpu --denoise-mode '{denoiseSA_mode}' --denoise-luma {denoiseSA_luma_amount} --denoise-color {denoiseSA_color_amount} --separate-channels -i {image} -o '{newimage}'"
-			print(cmd)
+			cmd = [python_path, executable_path, "cc", "denoise", "--gpu", "--denoise-mode", f"{denoiseSA_mode}", "--denoise-luma", f"{denoiseSA_luma_amount}", "--denoise-color", f"{denoiseSA_color_amount}", "--separate-channels", "-i", f"{image}", "-o", f"{newimage}"]
+			print(" ".join(cmd))
 			
-			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+			my_env = os.environ.copy()
+			my_env.pop("PYTHONPATH", None)
+			process = subprocess.Popen(cmd, shell=False, env=my_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
 
 			percent_re = re.compile(r"(\d+\.?\d*)" + "%")
 			if process.stdout:
@@ -319,6 +339,7 @@ def sharpen_SA(workdir):
 		config_file_path = (f"{config_dir}/sirilcc_saspro.conf")
 		with open(config_file_path, 'r') as file:
 			executable_path = file.readline().strip()
+			python_path = executable_path.replace("setiastrosuitepro", "python")
 	else:
 		print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
 		sys.exit(1)
@@ -327,10 +348,12 @@ def sharpen_SA(workdir):
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log(image)
 			newimage = (f"{(image).rsplit('.', 1)[0]}_ssa-{sharpenSA_mode.rsplit( )[0]}-{sharpenSA_non_stellar_amount}-{sharpenSA_stellar_amount}.fit")
-			cmd = f"{executable_path} cc sharpen --gpu --sharpening-mode '{sharpenSA_mode}' --nonstellar-amount {sharpenSA_non_stellar_amount} --stellar-amount {sharpenSA_stellar_amount} --auto-psf -i {image} -o '{newimage}'"
-			print(cmd)
+			cmd = [python_path, executable_path, "cc", "sharpen", "--gpu", "--sharpening-mode", f"{sharpenSA_mode}", "--nonstellar-amount", f"{sharpenSA_non_stellar_amount}", "--stellar-amount", f"{sharpenSA_stellar_amount}", "--auto-psf", "-i", f"{image}", "-o", f"{newimage}"]
+			print(" ".join(cmd))
 			
-			process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+			my_env = os.environ.copy()
+			my_env.pop("PYTHONPATH", None)
+			process = subprocess.Popen(cmd, shell=False, env=my_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
 
 			percent_re = re.compile(r"(\d+\.?\d*)" + "%")
 			if process.stdout:
@@ -411,6 +434,15 @@ def run_gui():
 
 			self.workdir_input = QLineEdit(os.getcwd())
 			form_layout.addRow("Working Directory:", self.workdir_input)
+
+			self.crop_cb = QCheckBox("Crop image")
+			self.crop_value = QLineEdit("1")
+			self.crop_value.setEnabled(False)
+			self.crop_cb.toggled.connect(self.crop_value.setEnabled)
+			crop_layout = QHBoxLayout()
+			crop_layout.addWidget(QLabel("Percentage(s) (space separated):"))
+			crop_layout.addWidget(self.crop_value)
+			form_layout.addRow(self.crop_cb, crop_layout)
 
 			self.abe_cb = QCheckBox("Auto Background Extraction")
 			self.abe_npoints = QLineEdit("100")
@@ -635,6 +667,7 @@ def run_gui():
 		def get_values(self):
 			return {
 				"workdir": self.workdir_input.text(),
+				"crop": self.crop_value.text().split() if self.crop_cb.isChecked() else None,
 				"abe": [self.abe_npoints.text(), self.abe_polydegree.text(), self.abe_rbfsmooth.text()] if self.abe_cb.isChecked() else None,				
 				"bkg": self.bkg_smooth.text() if self.bkg_cb.isChecked() else None,
 				"bkgGraX": self.bkg_grax_smooth.text() if self.bkg_grax_cb.isChecked() else None,
@@ -699,6 +732,8 @@ def run_gui():
 		
 		if values["workdir"]:
 			cli_args.extend(["-d", values["workdir"]])
+		if values["crop"]:
+			cli_args.extend(["-c"] + values["crop"])
 		if values["abe"]:
 			cli_args.extend(["-ab", values["abe"][0], values["abe"][1], values["abe"][2]])		
 		if values["bkg"]:
@@ -742,13 +777,14 @@ def run_gui():
 # ==============================================================================	
 
 def main_logic(argv):
-	global args, npoints, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount, spcc_sensor, spcc_oscfilter, spcc_rfilter, spcc_gfilter, spcc_bfilter, Type
+	global args, npoints, crop, crop_value, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount, spcc_sensor, spcc_oscfilter, spcc_rfilter, spcc_gfilter, spcc_bfilter, Type
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-ab","--abe", nargs='+', action='append', help="AutoBGE, provide npoints, polydegree and rbfsmooth")
 	parser.add_argument("-as","--autostretch", help="Siril autostretch (linked)" ,action="store_true")
 	parser.add_argument("-b","--bkg", nargs='+', action='append', help="siril background extraction, provide smoothing 0.0-1.0")
 	parser.add_argument("-bg","--bkgGraX", nargs='+', action='append', help="GraXpert background extraction, provide smoothing 0.0-1.0")
+	parser.add_argument("-c","--crop", nargs='+', help="crop image by percentage, accepts multiple values for different crops")
 	parser.add_argument("-cc","--spcc", nargs='+', help="spcc color calibration, provide sensor and filter(s) OSC or R, G & B, using quotes")
 	parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
 
@@ -783,6 +819,9 @@ def main_logic(argv):
 			if image.endswith(('.fits', '.fit', '.fts', '.fz')):
 				original_images.append(f"{image}")
 
+		if args.crop:
+			crop(workdir)
+		
 		if args.abe:
 			for n in args.abe:
 				npoints = (n[0])
