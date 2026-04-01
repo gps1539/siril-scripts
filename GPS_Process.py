@@ -26,6 +26,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.8   Set Cuda 'expandable_segments:True' for better GPU memory allocation
 0.1.9	SPCC improvements
 0.2.0	Adds cropping and better handling of siril and setiastro python version mismatch
+0.2.1   Add option for separate processing of starsmask and starless
 """
 
 import sys
@@ -36,7 +37,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 # PyQt6 for GUI
 try:
@@ -243,7 +244,7 @@ def denoise_SA(workdir):
 			
 def multiprocess(workdir):
 	os.chdir(workdir)
-	base_directory = 'processed_' 
+	base_directory = 'Processed_' 
 	index = 1
 	while True:
 	    path = f"{base_directory}{index}"
@@ -256,6 +257,19 @@ def multiprocess(workdir):
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in original_images:
 			shutil.move(image, (f"{workdir}/{base_directory}{index}"))
 
+def pixelmath(workdir):
+	os.chdir(workdir)
+	for starmask in os.listdir():
+		if starmask.startswith("starmask"):
+			stars = starmask
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:	
+			less = image
+	siril.cmd(f"PM '${less}$ + ${stars}$ / 1 + ${less}$ * ${stars}$'")
+	newimage = f"{os.path.splitext(less.removeprefix('starless_'))[0]}_combined"
+	siril.cmd("save", newimage)
+	processed_images.append(f"{newimage}")
+
 def sharpen(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
@@ -267,6 +281,21 @@ def sharpen(workdir):
 			siril.cmd("rl -gdstep=0.0001 -iters=40 -alpha=3000 -tv")
 			newimage = (f"{os.path.splitext(image)[0]}_ss")
 			siril.cmd("save", newimage)
+			processed_images.append(f"{image}")
+
+def starnet(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log("Running starnet on " + image)
+			siril.cmd("load", image)
+			siril.cmd("starnet -stretch -upscale")
+			for starmask in os.listdir():
+				if starmask.startswith("starmask"):
+					siril.cmd("load", starmask)
+					siril.cmd("synthstar")
+					siril.cmd("save", starmask)
+					processed_images.append(f"{starmask}")
 			processed_images.append(f"{image}")
 
 def sharpen_CC(workdir):
@@ -481,6 +510,9 @@ def run_gui():
 			bkg_grax_layout.addWidget(self.bkg_grax_smooth)
 			form_layout.addRow(self.bkg_grax_cb, bkg_grax_layout)
 
+			self.starnet_cb = QCheckBox("Starnet: runs synthstar on starmask, selected sharpen and/or denoise on starless, then combines with pixelmath")
+			form_layout.addRow(self.starnet_cb)
+
 			blank_line = QFrame()
 			blank_line.setFixedHeight(10)  # Adjust height as needed
 			form_layout.addRow(blank_line) 
@@ -680,6 +712,7 @@ def run_gui():
 				"sharpenCC": [self.sharpen_cc_mode.currentText(), self.sharpen_cc_stellar_amount.text(), self.sharpen_cc_non_stellar_amount.text(), self.sharpen_cc_non_stellar_strength.text()] if self.sharpen_cc_cb.isChecked() else None,
 				"sharpenGraX": [self.sharpen_grax_mode.currentText(), self.sharpen_grax_strength.text()] if self.sharpen_grax_cb.isChecked() else None,
 				"sharpenSA": [self.sharpen_ssa_mode.currentText(), self.sharpen_ssa_stellar_amount.text(), self.sharpen_ssa_non_stellar_amount.text()] if self.sharpen_ssa_cb.isChecked() else None,
+				"starnet": self.starnet_cb.isChecked(),
 				"autostretch": self.autostretch_cb.isChecked(),				
 				"statstretch": [self.stretch_hdr_amount.text(), self.stretch_hdr_knee.text(), self.stretch_boost_amount.text()] if self.stretch_cb.isChecked() else None,
 			}
@@ -756,6 +789,8 @@ def run_gui():
 			cli_args.extend(["-ssa", values["sharpenSA"][0], values["sharpenSA"][1], values["sharpenSA"][2]])		
 		if values["sharpenGraX"]:
 			cli_args.extend(["-sg", values["sharpenGraX"][0], values["sharpenGraX"][1]])
+		if values["starnet"]:
+			cli_args.append("-sn")
 		if values["autostretch"]:
 			cli_args.append("-as")
 		if values["statstretch"]:
@@ -777,7 +812,7 @@ def run_gui():
 # ==============================================================================	
 
 def main_logic(argv):
-	global args, npoints, crop, crop_value, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount, spcc_sensor, spcc_oscfilter, spcc_rfilter, spcc_gfilter, spcc_bfilter, Type
+	global args, npoints, crop, crop_value, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, starnet, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount, spcc_sensor, spcc_oscfilter, spcc_rfilter, spcc_gfilter, spcc_bfilter, Type
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-ab","--abe", nargs='+', action='append', help="AutoBGE, provide npoints, polydegree and rbfsmooth")
@@ -796,6 +831,7 @@ def main_logic(argv):
 	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
 	parser.add_argument("-sc","--sharpenCC", nargs='+', action='append' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
+	parser.add_argument("-sn","--starnet", help="runs synthstar on starmask, selected sharpen and/or denoise on starless, then combines with pixelmath" ,action="store_true")	
 	parser.add_argument("-ssa","--sharpenSA", nargs='+', action='append' ,help="run SASpro CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount")
 	parser.add_argument("-ss","--statstretch", nargs='+', action='append', help="statistical stretch, provide HDR amount, HDR knee and boost amount")
 	parser.add_argument("-v","--version", help="print the version and exit",action="store_true")
@@ -822,6 +858,9 @@ def main_logic(argv):
 		if args.crop:
 			crop(workdir)
 		
+		if args.starnet:
+			starnet(workdir)
+
 		if args.abe:
 			for n in args.abe:
 				npoints = (n[0])
@@ -856,7 +895,7 @@ def main_logic(argv):
 
 		if args.sharpen:
 			sharpen(workdir)
-			
+
 		if args.sharpenCC:
 			for n in args.sharpenCC:			
 				sharpenCC_mode = (n[0])
@@ -920,6 +959,9 @@ def main_logic(argv):
 			for n in args.denoiseGraX:
 				denoiseGraX = (n[0])
 				denoise_GraX(workdir)
+
+		if args.starnet:
+			pixelmath(workdir)
 
 		if args.autostretch:
 			autostretch(workdir)
