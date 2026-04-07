@@ -26,7 +26,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.8   Set Cuda 'expandable_segments:True' for better GPU memory allocation
 0.1.9	SPCC improvements
 0.2.0	Adds cropping and better handling of siril and setiastro python version mismatch
-0.2.1   Add option for separate processing of starsmask and starless
+0.2.1   Add option to separate starmask and starless processing, with starmask recombine factor 
+0.2.2   Add option to run synthstar on starmask
 """
 
 import sys
@@ -37,7 +38,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 # PyQt6 for GUI
 try:
@@ -259,13 +260,14 @@ def multiprocess(workdir):
 
 def pixelmath(workdir):
 	os.chdir(workdir)
+	recombine_factor = (args.starnet)
 	for starmask in os.listdir():
 		if starmask.startswith("starmask"):
 			stars = starmask
 	for image in os.listdir():
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:	
 			less = image
-	siril.cmd(f"PM '${less}$ + ${stars}$ / 1 + ${less}$ * ${stars}$'")
+	siril.cmd(f"PM '${less}$ + (${stars}$ * {recombine_factor}) / 1 + ${less}$ * ${stars}$'")
 	newimage = f"{os.path.splitext(less.removeprefix('starless_'))[0]}_combined"
 	siril.cmd("save", newimage)
 	processed_images.append(f"{newimage}")
@@ -293,7 +295,8 @@ def starnet(workdir):
 			for starmask in os.listdir():
 				if starmask.startswith("starmask"):
 					siril.cmd("load", starmask)
-					siril.cmd("synthstar")
+					if args.synthstar:
+						siril.cmd("synthstar")
 					siril.cmd("save", starmask)
 					processed_images.append(f"{starmask}")
 			processed_images.append(f"{image}")
@@ -510,8 +513,17 @@ def run_gui():
 			bkg_grax_layout.addWidget(self.bkg_grax_smooth)
 			form_layout.addRow(self.bkg_grax_cb, bkg_grax_layout)
 
-			self.starnet_cb = QCheckBox("Starnet: runs synthstar on starmask, selected sharpen and/or denoise on starless, then combines with pixelmath")
-			form_layout.addRow(self.starnet_cb)
+			self.starnet_cb = QCheckBox("Starnet")
+			self.recombine_factor = QLineEdit("0.5")
+			self.recombine_factor.setEnabled(False)
+			self.starnet_cb.toggled.connect(self.recombine_factor.setEnabled)
+			starnet_layout = QHBoxLayout()
+			starnet_layout.addWidget(QLabel("Recombine factor:"))
+			starnet_layout.addWidget(self.recombine_factor)
+			form_layout.addRow(self.starnet_cb, starnet_layout)
+	
+			self.synthstar_cb = QCheckBox("Synthstar on starmask")
+			form_layout.addRow(self.synthstar_cb)
 
 			blank_line = QFrame()
 			blank_line.setFixedHeight(10)  # Adjust height as needed
@@ -712,7 +724,8 @@ def run_gui():
 				"sharpenCC": [self.sharpen_cc_mode.currentText(), self.sharpen_cc_stellar_amount.text(), self.sharpen_cc_non_stellar_amount.text(), self.sharpen_cc_non_stellar_strength.text()] if self.sharpen_cc_cb.isChecked() else None,
 				"sharpenGraX": [self.sharpen_grax_mode.currentText(), self.sharpen_grax_strength.text()] if self.sharpen_grax_cb.isChecked() else None,
 				"sharpenSA": [self.sharpen_ssa_mode.currentText(), self.sharpen_ssa_stellar_amount.text(), self.sharpen_ssa_non_stellar_amount.text()] if self.sharpen_ssa_cb.isChecked() else None,
-				"starnet": self.starnet_cb.isChecked(),
+				"starnet": self.recombine_factor.text() if self.starnet_cb.isChecked() else None,
+				"synthstar": self.synthstar_cb.isChecked(),
 				"autostretch": self.autostretch_cb.isChecked(),				
 				"statstretch": [self.stretch_hdr_amount.text(), self.stretch_hdr_knee.text(), self.stretch_boost_amount.text()] if self.stretch_cb.isChecked() else None,
 			}
@@ -790,7 +803,9 @@ def run_gui():
 		if values["sharpenGraX"]:
 			cli_args.extend(["-sg", values["sharpenGraX"][0], values["sharpenGraX"][1]])
 		if values["starnet"]:
-			cli_args.append("-sn")
+			cli_args.extend(["-sn", values["starnet"]])
+		if values["synthstar"]:
+			cli_args.append("-sy")		
 		if values["autostretch"]:
 			cli_args.append("-as")
 		if values["statstretch"]:
@@ -829,9 +844,10 @@ def main_logic(argv):
 	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
 	parser.add_argument("-m","--multiprocess", help="saves processed images in processed_N directory" ,action="store_true")	
 	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
-	parser.add_argument("-sc","--sharpenCC", nargs='+', action='append' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
+	parser.add_argument("-sc","--sharpenCC", nargs='+' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
-	parser.add_argument("-sn","--starnet", help="runs synthstar on starmask, selected sharpen and/or denoise on starless, then combines with pixelmath" ,action="store_true")	
+	parser.add_argument("-sn","--starnet", help="create starless & starmask images. Sharpen and/or denoise only runs starless, then combines starmask by provided factor.", required = True, type = float)
+	parser.add_argument("-sy","--synthstar", help="Runs synthstar on starmask to correct misshapen stars" ,action="store_true")	
 	parser.add_argument("-ssa","--sharpenSA", nargs='+', action='append' ,help="run SASpro CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount")
 	parser.add_argument("-ss","--statstretch", nargs='+', action='append', help="statistical stretch, provide HDR amount, HDR knee and boost amount")
 	parser.add_argument("-v","--version", help="print the version and exit",action="store_true")
