@@ -16,7 +16,7 @@ pyscript GPS_Preprocess.py -d <your-workspace-directory-path> -b 95% -r 85% -w 8
 ---
 
 Preprocessing for Siril
-from Graham Smith (2025)
+from Graham Smith (2025, 2026)
 
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
@@ -24,22 +24,25 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.4   Added nbstars as an optional filter. 
 0.1.5   Adds multi-session support to calibrate each session separately
 0.1.6   Handle working directory with spaces
+0.1.7   Added tooltips
+0.1.8   Adds satellite removal using setiastropro AI4
  
 """
 
 import sys
 import os
+import subprocess
 import sirilpy as s
 import argparse
 import re
 import shlex
 
-VERSION = "0.1.6"
+VERSION = "0.1.8"
 	
 # PyQt6 for GUI
 try:
 	from PyQt6.QtWidgets import (
-		QApplication, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox,
+		QApplication, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox, QToolTip,
 		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox, QTextEdit
 	)
 except ImportError:
@@ -131,6 +134,48 @@ def register(process_dir):
 		siril.cmd(
 			f"seqapplyreg {light_seq} -filter-bkg={bkg} -filter-nbstars={stars} -filter-round={roundf} -filter-wfwhm={wfwhm} {drizzle} {flat}")
 
+def satellite_removal(workdir):
+	os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+	config_dir = siril.get_siril_configdir()
+	if os.path.isfile (f"{config_dir}/sirilcc_saspro.conf"):
+		config_file_path = (f"{config_dir}/sirilcc_saspro.conf")
+		with open(config_file_path, 'r') as file:
+			executable_path = file.readline().strip()
+			python_path = executable_path.replace("setiastrosuitepro", "python")
+	else:
+		print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
+		sys.exit(1)
+		
+	os.rename('lights', 'lights_preremoval')
+	os.mkdir('lights')
+	os.chdir('lights_preremoval')
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')):
+			siril.log(f"Running satellite trail removal on {image}")
+			newimage = (f"{os.path.splitext(image)[0]}.fit")
+			cmd = [python_path, executable_path, "cc", "satellite", "--gpu", "--mode", "full", "--clip-trail", "-i", f"{image}", "-o", f"{workdir}/lights/{newimage}"]
+			print(" ".join(cmd))
+			
+			my_env = os.environ.copy()
+			my_env.pop("PYTHONPATH", None)
+			process = subprocess.Popen(cmd, shell=False, env=my_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+			percent_re = re.compile(r"(\d+\.?\d*)" + "%")
+			if process.stdout:
+				for line in iter(process.stdout.readline, ''):
+					line = line.strip()
+					if not line:
+						continue
+					m = percent_re.search(line)
+					if m:
+						try:
+							pct = float(m.group(1))
+							siril.update_progress(f"Satellite trail removal", pct / 100.0)
+						except ValueError:
+							siril.log(line)
+					else:
+							siril.log(line)
+			process.wait()
+
 def stack(process_dir):
 	siril.cmd(f"cd {process_dir}")
 	siril.cmd("load pp_light_00001")
@@ -167,6 +212,9 @@ def run_gui():
 				print("Working directory does not exist:", e)
 				sys.exit(1)
 
+			self.satellite_cb = QCheckBox("Satellite trail removal")
+			form_layout.addRow(self.satellite_cb)
+
 			self.background_input = QLineEdit("100%")
 			form_layout.addRow("Background filter (XX% or X):", self.background_input)
 			
@@ -174,16 +222,18 @@ def run_gui():
 			form_layout.addRow("Round filter (XX% or X):", self.round_input)
 
 			self.stars_input = QLineEdit("100%")
-			form_layout.addRow("Number of stars (XX% or X):", self.stars_input)
+			form_layout.addRow("Number of stars filter (XX% or X):", self.stars_input)
 				
 			self.wfwhm_input = QLineEdit("100%")
 			form_layout.addRow("wFWHM filter (XX% or X):", self.wfwhm_input)
 
 			self.feather_input = QLineEdit("0")
+			self.feather_input.setToolTip("Apply feather mask on image borders in 'n' pixels")
 			form_layout.addRow("Feathering (px):", self.feather_input)
 
 			self.drizzle = QCheckBox("Drizzle (scale), enable for OSC")
 			self.drizzle_input = QLineEdit("1")
+			self.drizzle_input.setToolTip("File size inceases by square of value")
 			self.drizzle_input.setEnabled(False)
 			self.drizzle.toggled.connect(self.drizzle_input.setEnabled)
 			drizzle_layout = QHBoxLayout()
@@ -195,6 +245,7 @@ def run_gui():
 
 			self.platesolve_cb = QCheckBox("Platesolve, optionally provide focal lenght")
 			self.platesolve_input = QLineEdit()
+			self.platesolve_input.setToolTip("Override value in fits header")
 			self.platesolve_input.setEnabled(False)
 			self.platesolve_cb.toggled.connect(self.platesolve_input.setEnabled)
 			platesolve_layout = QHBoxLayout()
@@ -207,8 +258,7 @@ def run_gui():
 			self.multi_cb = QCheckBox("Multi session calibration")
 			self.multi_input = QTextEdit()
 			self.multi_input.setFixedHeight(100)
-			default_text = "Add working directories here"
-			self.multi_input.setPlainText(default_text)
+			self.multi_input.setToolTip("Add working directories here")
 			self.multi_input.setEnabled(False)
 			self.multi_cb.toggled.connect(self.multi_input.setEnabled)
 			multi_layout = QHBoxLayout()
@@ -226,6 +276,7 @@ def run_gui():
 		def get_values(self):
 			return {
 				"workdir": self.workdir_input.text(),
+				"satellite": self.satellite_cb.isChecked(),
 				"background": self.background_input.text(),
 				"round": self.round_input.text(),
 				"stars": self.stars_input.text(),
@@ -286,6 +337,8 @@ def run_gui():
 
 		if values["workdir"]:
 			cli_args.extend(["-d", values["workdir"]])
+		if values["satellite"]:
+			cli_args.append("-sr")
 		if values["background"]:
 			cli_args.extend(["-b", values["background"]])
 		if values["round"]:
@@ -335,6 +388,7 @@ def main_logic(argv):
 	parser.add_argument("-ps", "--platesolve", nargs='?', const=True, help="platesolve, optionally provide focal lenght")
 	parser.add_argument("-r", "--round", nargs='+',	help="round filter settings, XX%% or X")
 	parser.add_argument("-s", "--stars", nargs='+', help="# of stars filter settings, XX%% or X")
+	parser.add_argument("-sr", "--satellite", help="satellite trail removal", action="store_true")	
 	parser.add_argument("-v","--version", help="print the version and exit",action="store_true")
 	parser.add_argument("-w", "--wfwhm", nargs='+',	help="wfwhm filter settings, XX%% or X")
 	parser.add_argument("-z", "--drizzle", nargs='+', help="set drizzle scaling, required for OSC images")
@@ -372,6 +426,9 @@ def main_logic(argv):
 		process_dir = os.path.join(workdir, 'process')
 		siril.cmd("set32bits")
 		siril.cmd("setext", "fit")
+
+		if args.satellite:
+			satellite_removal(workdir)
 
 		if args.no_calibration:
 			light_nc(os.path.join(workdir, 'lights'), process_dir)
