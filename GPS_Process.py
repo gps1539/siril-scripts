@@ -15,7 +15,7 @@ pyscript GPS_Process.py -d <workspace> -sc 0.5 0.5 5
 ---
 
 Processing for Siril
-from Graham Smith (2025)
+from Graham Smith (2025, 2026)
 
 SPDX-License-Identifier: GPL-3.0-or-later
 -----
@@ -26,8 +26,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.8   Set Cuda 'expandable_segments:True' for better GPU memory allocation
 0.1.9	SPCC improvements
 0.2.0	Adds cropping and better handling of siril and setiastro python version mismatch
-0.2.1   Add option to separate starmask and starless processing, with starmask recombine factor 
-0.2.2   Add option to run synthstar on starmask
+0.2.1   Add option to separate starmask and starless processing, with starmask combine factor 
+0.2.2   Add option to run synthstar on starmask and GUI improvements
+0.2.3   Add stride input for starnet
 """
 
 import sys
@@ -38,13 +39,13 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 
 # PyQt6 for GUI
 try:
 	from PyQt6.QtWidgets import (
-		QApplication, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox,
-		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox, QFrame
+		QApplication, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox, QToolTip, QScrollArea,
+		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox, QFrame, QGroupBox, QWidget
 	)
 except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
@@ -260,14 +261,14 @@ def multiprocess(workdir):
 
 def pixelmath(workdir):
 	os.chdir(workdir)
-	recombine_factor = (args.starnet)
+	combine_factor = (args.starnet[2])
 	for starmask in os.listdir():
 		if starmask.startswith("starmask"):
 			stars = starmask
 	for image in os.listdir():
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:	
 			less = image
-	siril.cmd(f"PM '${less}$ + (${stars}$ * {recombine_factor}) / 1 + ${less}$ * ${stars}$'")
+	siril.cmd(f"PM '${less}$ + (${stars}$ * {combine_factor}) / 1 + ${less}$ * ${stars}$'")
 	newimage = f"{os.path.splitext(less.removeprefix('starless_'))[0]}_combined"
 	siril.cmd("save", newimage)
 	processed_images.append(f"{newimage}")
@@ -283,22 +284,6 @@ def sharpen(workdir):
 			siril.cmd("rl -gdstep=0.0001 -iters=40 -alpha=3000 -tv")
 			newimage = (f"{os.path.splitext(image)[0]}_ss")
 			siril.cmd("save", newimage)
-			processed_images.append(f"{image}")
-
-def starnet(workdir):
-	os.chdir(workdir)
-	for image in os.listdir():
-		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
-			siril.log("Running starnet on " + image)
-			siril.cmd("load", image)
-			siril.cmd("starnet -stretch -upscale")
-			for starmask in os.listdir():
-				if starmask.startswith("starmask"):
-					siril.cmd("load", starmask)
-					if args.synthstar:
-						siril.cmd("synthstar")
-					siril.cmd("save", starmask)
-					processed_images.append(f"{starmask}")
 			processed_images.append(f"{image}")
 
 def sharpen_CC(workdir):
@@ -439,6 +424,31 @@ def spcc(workdir):
 #			os.remove(image)
 			processed_images.append(f"{image}")
 
+def starnet(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log("Running starnet on " + image)
+			siril.cmd("load", image)
+			if args.starnet[0] == 2:
+				upscale = '-upscale'
+			elif args.starnet[0] == 1:
+				upscale = ''
+			else:
+				print("Upscale factor needs to be a 1 or 2")
+				sys.exit(1)
+			stride = int(args.starnet[1])
+			siril.cmd(f"starnet -stretch {upscale} -stride={stride}")
+			for starmask in os.listdir():
+				if starmask.startswith("starmask"):
+					siril.cmd("load", starmask)
+					if args.synthstar:
+						siril.cmd("synthstar")
+					siril.cmd("gauss 1.2")
+					siril.cmd("save", starmask)
+					processed_images.append(f"{starmask}")
+			processed_images.append(f"{image}")
+
 def statstretch(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
@@ -459,170 +469,265 @@ def run_gui():
 	class ProcessingDialog(QDialog):
 		def __init__(self, parent=None):
 			super().__init__(parent)
-			self.setWindowTitle("Siril GPS_Processing, (all fit(s) files in working directory will be processed)")
+			self.setWindowTitle("Siril GPS_Processing")
+			self.setMinimumWidth(920)
+			self.setMinimumHeight(800)
 			
-			layout = QVBoxLayout(self)
-			form_layout = QFormLayout()
+			main_layout = QVBoxLayout(self)
 
+			# --- Working Directory (Top) ---
+			dir_group = QGroupBox()
+			dir_form = QFormLayout(dir_group)
 			self.workdir_input = QLineEdit(os.getcwd())
-			form_layout.addRow("Working Directory:", self.workdir_input)
+			self.workdir_input.setToolTip("All fit(s) files in working directory will be processed")
+			dir_form.addRow("Working Directory:", self.workdir_input)
+			main_layout.addWidget(dir_group)
+
+			# --- Scroll Area for Parameters ---
+			scroll = QScrollArea()
+			scroll.setWidgetResizable(True)
+			scroll_content = QWidget()
+			scroll_layout = QVBoxLayout(scroll_content)
+			scroll.setWidget(scroll_content)
+			main_layout.addWidget(scroll)
+
+			def create_aligned_label(text, width=85):
+				lbl = QLabel(text)
+				lbl.setFixedWidth(width)
+				return lbl
+
+			def add_aligned_row(form, checkbox, layout):
+				checkbox.setFixedWidth(220)
+				form.addRow(checkbox, layout)
+
+			# --- 1. Basic Setup Group ---
+			basic_group = QGroupBox("1. Crop, Star processing and/or Background Extraction")
+			basic_form = QFormLayout(basic_group)
 
 			self.crop_cb = QCheckBox("Crop image")
 			self.crop_value = QLineEdit("1")
+			self.crop_value.setFixedWidth(40)
+			self.crop_value.setToolTip("Provide one or more crop percentage(s)")
 			self.crop_value.setEnabled(False)
 			self.crop_cb.toggled.connect(self.crop_value.setEnabled)
 			crop_layout = QHBoxLayout()
-			crop_layout.addWidget(QLabel("Percentage(s) (space separated):"))
+			crop_layout.setSpacing(10)
+			crop_layout.addWidget(create_aligned_label("%(s)"))
 			crop_layout.addWidget(self.crop_value)
-			form_layout.addRow(self.crop_cb, crop_layout)
+			crop_layout.addStretch()
+			add_aligned_row(basic_form, self.crop_cb, crop_layout)
 
-			self.abe_cb = QCheckBox("Auto Background Extraction")
+			self.starnet_cb = QCheckBox("Starnet")
+			self.scale_factor = QLineEdit("1")
+			self.scale_factor.setFixedWidth(40)
+			self.scale_factor.setEnabled(False)
+			self.stride = QLineEdit("256")
+			self.stride.setFixedWidth(40)
+			self.stride.setEnabled(False)
+			self.combine_factor = QLineEdit("0.5")
+			self.combine_factor.setFixedWidth(40)
+			self.combine_factor.setEnabled(False)
+			self.synthstar_cb = QCheckBox("Synthstar")
+			self.synthstar_cb.setEnabled(False)
+			self.starnet_cb.toggled.connect(self.scale_factor.setEnabled)
+			self.starnet_cb.toggled.connect(self.stride.setEnabled)
+			self.starnet_cb.toggled.connect(self.combine_factor.setEnabled)
+			self.starnet_cb.toggled.connect(self.synthstar_cb.setEnabled)
+			starnet_layout = QHBoxLayout()
+			starnet_layout.setSpacing(10)
+			starnet_layout.addWidget(create_aligned_label("Scale"))
+			starnet_layout.addWidget(self.scale_factor)
+			starnet_layout.addWidget(create_aligned_label("Stride"))
+			starnet_layout.addWidget(self.stride)
+			starnet_layout.addWidget(create_aligned_label("Star factor:"))
+			starnet_layout.addWidget(self.combine_factor)
+			starnet_layout.addWidget(self.synthstar_cb)
+			starnet_layout.addStretch()
+			add_aligned_row(basic_form, self.starnet_cb, starnet_layout)
+
+			self.abe_cb = QCheckBox("Auto Bkg Extraction")
 			self.abe_npoints = QLineEdit("100")
 			self.abe_polydegree = QLineEdit("2")
 			self.abe_rbfsmooth = QLineEdit("0.1")
+			self.abe_npoints.setFixedWidth(40)
 			self.abe_npoints.setEnabled(False)
-			self.abe_polydegree.setEnabled(False)
-			self.abe_rbfsmooth.setEnabled(False)
+			for w in [self.abe_polydegree, self.abe_rbfsmooth]:
+				w.setFixedWidth(40)
+				w.setEnabled(False)
 			self.abe_cb.toggled.connect(self.abe_npoints.setEnabled)
 			self.abe_cb.toggled.connect(self.abe_polydegree.setEnabled)
 			self.abe_cb.toggled.connect(self.abe_rbfsmooth.setEnabled)
 			abe_layout = QHBoxLayout()
-			abe_layout.addWidget(QLabel("Npoints:"))
+			abe_layout.setSpacing(10)
+			abe_layout.addWidget(create_aligned_label("Npoints"))
 			abe_layout.addWidget(self.abe_npoints)
-			abe_layout.addWidget(QLabel("Polydegree:"))
+			abe_layout.addWidget(create_aligned_label("Polydegree"))
 			abe_layout.addWidget(self.abe_polydegree)
-			abe_layout.addWidget(QLabel("Rbfsmooth:"))
+			abe_layout.addWidget(create_aligned_label("Rbfsmooth"))
 			abe_layout.addWidget(self.abe_rbfsmooth)
-			form_layout.addRow(self.abe_cb, abe_layout)
+			abe_layout.addStretch()
+			add_aligned_row(basic_form, self.abe_cb, abe_layout)
 			
-			self.bkg_cb = QCheckBox("Siril Background Extraction")
+			self.bkg_cb = QCheckBox("Siril Bkg Extraction")
 			self.bkg_smooth = QLineEdit("0.5")
+			self.bkg_smooth.setFixedWidth(40)
 			self.bkg_smooth.setEnabled(False)
 			self.bkg_cb.toggled.connect(self.bkg_smooth.setEnabled)
 			bkg_layout = QHBoxLayout()
-			bkg_layout.addWidget(QLabel("Smoothing:"))
+			bkg_layout.setSpacing(10)
+			bkg_layout.addWidget(create_aligned_label("Smoothing"))
 			bkg_layout.addWidget(self.bkg_smooth)
-			form_layout.addRow(self.bkg_cb, bkg_layout)
+			bkg_layout.addStretch()
+			add_aligned_row(basic_form, self.bkg_cb, bkg_layout)
 
-			self.bkg_grax_cb = QCheckBox("GraXpert Background Extraction")
+			self.bkg_grax_cb = QCheckBox("GraXpert Bkg Extraction")
 			self.bkg_grax_smooth = QLineEdit("0.5")
+			self.bkg_grax_smooth.setFixedWidth(40)
 			self.bkg_grax_smooth.setEnabled(False)
 			self.bkg_grax_cb.toggled.connect(self.bkg_grax_smooth.setEnabled)
 			bkg_grax_layout = QHBoxLayout()
-			bkg_grax_layout.addWidget(QLabel("Smoothing:"))
+			bkg_grax_layout.setSpacing(10)
+			bkg_grax_layout.addWidget(create_aligned_label("Smoothing"))
 			bkg_grax_layout.addWidget(self.bkg_grax_smooth)
-			form_layout.addRow(self.bkg_grax_cb, bkg_grax_layout)
+			bkg_grax_layout.addStretch()
+			add_aligned_row(basic_form, self.bkg_grax_cb, bkg_grax_layout)
 
-			self.starnet_cb = QCheckBox("Starnet")
-			self.recombine_factor = QLineEdit("0.5")
-			self.recombine_factor.setEnabled(False)
-			self.starnet_cb.toggled.connect(self.recombine_factor.setEnabled)
-			starnet_layout = QHBoxLayout()
-			starnet_layout.addWidget(QLabel("Recombine factor:"))
-			starnet_layout.addWidget(self.recombine_factor)
-			form_layout.addRow(self.starnet_cb, starnet_layout)
-	
-			self.synthstar_cb = QCheckBox("Synthstar on starmask")
-			form_layout.addRow(self.synthstar_cb)
+#			self.spcc_cb = QCheckBox("Siril SPCC")
+#			self.spcc_sensor = QLineEdit("")
+#			self.spcc_sensor.setPlaceholderText("sensor name")
+#			self.spcc_filters = QLineEdit("")
+#			self.spcc_filters.setPlaceholderText("filters OSC or R G B")
+#			self.spcc_sensor.setEnabled(False)
+#			self.spcc_filters.setEnabled(False)
+#			self.spcc_cb.toggled.connect(self.spcc_sensor.setEnabled)
+#			self.spcc_cb.toggled.connect(self.spcc_filters.setEnabled)
+#			spcc_layout = QHBoxLayout()
+#			spcc_layout.setSpacing(10)
+#			spcc_layout.addWidget(create_aligned_label("Sensor:"))
+#			spcc_layout.addWidget(self.spcc_sensor)
+#			spcc_layout.addWidget(create_aligned_label("Filter(s):"))
+#			spcc_layout.addWidget(self.spcc_filters)
+#			spcc_layout.addStretch()
+#			add_aligned_row(basic_form, self.spcc_cb, spcc_layout)
 
-			blank_line = QFrame()
-			blank_line.setFixedHeight(10)  # Adjust height as needed
-			form_layout.addRow(blank_line) 
+			scroll_layout.addWidget(basic_group)
 
-			self.sharpen_cb = QCheckBox("Siril Sharpen (Deconvolution)")
-			form_layout.addRow(self.sharpen_cb)
+			# --- 2. Sharpening Group ---
+			sharpen_group = QGroupBox("2. Sharpening")
+			sharpen_form = QFormLayout(sharpen_group)
 
-			self.sharpen_cc_cb = QCheckBox("Cosmic Clarity Sharpen")
+			self.sharpen_cb = QCheckBox("Siril Sharpen")
+			sharpen_form.addRow(self.sharpen_cb)
+
+			self.sharpen_cc_cb = QCheckBox("CC Sharpen")
 			self.sharpen_cc_mode = QComboBox()
 			self.sharpen_cc_mode.addItems(['Both', 'Stellar Only' ,'Non-Stellar Only'])
 			self.sharpen_cc_stellar_amount = QLineEdit("0.5")
 			self.sharpen_cc_non_stellar_amount = QLineEdit("0.5")
 			self.sharpen_cc_non_stellar_strength = QLineEdit("5")
+			self.sharpen_cc_mode.setFixedWidth(80)
 			self.sharpen_cc_mode.setEnabled(False)
-			self.sharpen_cc_stellar_amount.setEnabled(False)
-			self.sharpen_cc_non_stellar_amount.setEnabled(False)
-			self.sharpen_cc_non_stellar_strength.setEnabled(False)
+			for w in [self.sharpen_cc_stellar_amount, self.sharpen_cc_non_stellar_amount, self.sharpen_cc_non_stellar_strength]:
+				w.setFixedWidth(40)
+				w.setEnabled(False)
 			self.sharpen_cc_cb.toggled.connect(self.sharpen_cc_mode.setEnabled)
 			self.sharpen_cc_cb.toggled.connect(self.sharpen_cc_stellar_amount.setEnabled)
 			self.sharpen_cc_cb.toggled.connect(self.sharpen_cc_non_stellar_amount.setEnabled)
 			self.sharpen_cc_cb.toggled.connect(self.sharpen_cc_non_stellar_strength.setEnabled)
 			self.sharpen_cc_mode.currentTextChanged.connect(self.update_sharpen_cc_options)
-			self.update_sharpen_cc_options(self.sharpen_cc_mode.currentText())
 			sharpen_cc_layout = QHBoxLayout()
-			sharpen_cc_layout.addWidget(QLabel("Mode:"))
+			sharpen_cc_layout.setSpacing(10)
+			sharpen_cc_layout.addWidget(create_aligned_label("Mode"))
 			sharpen_cc_layout.addWidget(self.sharpen_cc_mode)
-			sharpen_cc_layout.addWidget(QLabel("Stellar Amount:"))
+			sharpen_cc_layout.addWidget(create_aligned_label("Stellar"))
 			sharpen_cc_layout.addWidget(self.sharpen_cc_stellar_amount)
-			sharpen_cc_layout.addWidget(QLabel("Non-Stellar Amount:"))
+			sharpen_cc_layout.addWidget(create_aligned_label("Non-Stellar"))
 			sharpen_cc_layout.addWidget(self.sharpen_cc_non_stellar_amount)
-			sharpen_cc_layout.addWidget(QLabel("Non-Stellar Strength:"))
+			sharpen_cc_layout.addWidget(create_aligned_label("Strength"))
 			sharpen_cc_layout.addWidget(self.sharpen_cc_non_stellar_strength)
-			form_layout.addRow(self.sharpen_cc_cb, sharpen_cc_layout)
+			sharpen_cc_layout.addStretch()
+			add_aligned_row(sharpen_form, self.sharpen_cc_cb, sharpen_cc_layout)
 
 			self.sharpen_ssa_cb = QCheckBox("Setiastro CC Sharpen")
 			self.sharpen_ssa_mode = QComboBox()
 			self.sharpen_ssa_mode.addItems(['Both', 'Stellar Only' ,'Non-Stellar Only'])
 			self.sharpen_ssa_stellar_amount = QLineEdit("0.5")
 			self.sharpen_ssa_non_stellar_amount = QLineEdit("0.5")
+			self.sharpen_ssa_mode.setFixedWidth(80)
 			self.sharpen_ssa_mode.setEnabled(False)
-			self.sharpen_ssa_stellar_amount.setEnabled(False)
-			self.sharpen_ssa_non_stellar_amount.setEnabled(False)
+			for w in [self.sharpen_ssa_stellar_amount, self.sharpen_ssa_non_stellar_amount]:
+				w.setFixedWidth(40)
+				w.setEnabled(False)
 			self.sharpen_ssa_cb.toggled.connect(self.sharpen_ssa_mode.setEnabled)
 			self.sharpen_ssa_cb.toggled.connect(self.sharpen_ssa_stellar_amount.setEnabled)
 			self.sharpen_ssa_cb.toggled.connect(self.sharpen_ssa_non_stellar_amount.setEnabled)
 			self.sharpen_ssa_mode.currentTextChanged.connect(self.update_sharpen_ssa_options)
-			self.update_sharpen_ssa_options(self.sharpen_ssa_mode.currentText())
 			sharpen_ssa_layout = QHBoxLayout()
-			sharpen_ssa_layout.addWidget(QLabel("Mode:"))
+			sharpen_ssa_layout.setSpacing(10)
+			sharpen_ssa_layout.addWidget(create_aligned_label("Mode"))
 			sharpen_ssa_layout.addWidget(self.sharpen_ssa_mode)
-			sharpen_ssa_layout.addWidget(QLabel("Stellar Amount:"))
+			sharpen_ssa_layout.addWidget(create_aligned_label("Stellar"))
 			sharpen_ssa_layout.addWidget(self.sharpen_ssa_stellar_amount)
-			sharpen_ssa_layout.addWidget(QLabel("Non-Stellar Amount:"))
+			sharpen_ssa_layout.addWidget(create_aligned_label("Non-Stellar"))
 			sharpen_ssa_layout.addWidget(self.sharpen_ssa_non_stellar_amount)
-			form_layout.addRow(self.sharpen_ssa_cb, sharpen_ssa_layout)
-			
+			sharpen_ssa_layout.addStretch()
+			add_aligned_row(sharpen_form, self.sharpen_ssa_cb, sharpen_ssa_layout)
+
 			self.sharpen_grax_cb = QCheckBox("GraXpert Sharpen")
 			self.sharpen_grax_mode = QComboBox()
 			self.sharpen_grax_mode.addItems(['both', 'object' ,'stellar'])
 			self.sharpen_grax_strength = QLineEdit("0.5")
+			self.sharpen_grax_mode.setFixedWidth(80)
 			self.sharpen_grax_mode.setEnabled(False)
-			self.sharpen_grax_strength.setEnabled(False)
+			for w in [self.sharpen_grax_strength]:
+				w.setFixedWidth(40)
+				w.setEnabled(False)
 			self.sharpen_grax_cb.toggled.connect(self.sharpen_grax_mode.setEnabled)
 			self.sharpen_grax_cb.toggled.connect(self.sharpen_grax_strength.setEnabled)
 			sharpen_grax_layout = QHBoxLayout()
-			sharpen_grax_layout.addWidget(QLabel("Mode:"))
+			sharpen_grax_layout.setSpacing(10)
+			sharpen_grax_layout.addWidget(create_aligned_label("Mode"))
 			sharpen_grax_layout.addWidget(self.sharpen_grax_mode)	
-			sharpen_grax_layout.addWidget(QLabel("Strength:"))
-			sharpen_grax_layout.addWidget(self.sharpen_grax_strength)	
-			form_layout.addRow(self.sharpen_grax_cb, sharpen_grax_layout)
+			sharpen_grax_layout.addWidget(create_aligned_label("Strength"))
+			sharpen_grax_layout.addWidget(self.sharpen_grax_strength)
+			sharpen_grax_layout.addStretch()
+			add_aligned_row(sharpen_form, self.sharpen_grax_cb, sharpen_grax_layout)
+			scroll_layout.addWidget(sharpen_group)
 
-			blank_line = QFrame()
-			blank_line.setFixedHeight(10)  # Adjust height as needed
-			form_layout.addRow(blank_line) 
-						
-			self.denoise_cb = QCheckBox("Siril Denoise (denoise -indep -vst)")
-			form_layout.addRow(self.denoise_cb)
+			# --- 3. Denoising Group ---
+			denoise_group = QGroupBox("3. Denoising")
+			denoise_form = QFormLayout(denoise_group)
+			self.denoise_cb = QCheckBox("Siril Denoise")
+			self.denoise_cb.setFixedWidth(250)
+			denoise_form.addRow(self.denoise_cb)
 			
-			self.denoise_cc_cb = QCheckBox("Cosmic Clarity Denoise")
+			self.denoise_cc_cb = QCheckBox("CC Denoise")
 			self.denoise_cc_mode = QComboBox()
 			self.denoise_cc_mode.addItems(['full', 'luminance', 'separate'])
 			self.denoise_cc_strength = QLineEdit("0.5")
+			self.denoise_cc_mode.setFixedWidth(80)
 			self.denoise_cc_mode.setEnabled(False)
+			self.denoise_cc_strength.setFixedWidth(40)
 			self.denoise_cc_strength.setEnabled(False)
 			self.denoise_cc_cb.toggled.connect(self.denoise_cc_mode.setEnabled)
 			self.denoise_cc_cb.toggled.connect(self.denoise_cc_strength.setEnabled)
 			denoise_cc_layout = QHBoxLayout()
-			denoise_cc_layout.addWidget(QLabel("Mode:"))
+			denoise_cc_layout.setSpacing(10)
+			denoise_cc_layout.addWidget(create_aligned_label("Mode"))
 			denoise_cc_layout.addWidget(self.denoise_cc_mode)
-			denoise_cc_layout.addWidget(QLabel("Strength:"))
+			denoise_cc_layout.addWidget(create_aligned_label("Strength"))
 			denoise_cc_layout.addWidget(self.denoise_cc_strength)
-			form_layout.addRow(self.denoise_cc_cb, denoise_cc_layout)
+			denoise_cc_layout.addStretch()
+			add_aligned_row(denoise_form, self.denoise_cc_cb, denoise_cc_layout)
 
 			self.denoise_dsa_cb = QCheckBox("Setiastro CC Denoise")
 			self.denoise_dsa_mode = QComboBox()
 			self.denoise_dsa_mode.addItems(['full', 'luminance'])
+			self.denoise_dsa_mode.setFixedWidth(80)
 			self.denoise_dsa_luma_amount = QLineEdit("0.5")
-			self.denoise_dsa_color_amount = QLineEdit("0.5")			
+			self.denoise_dsa_luma_amount.setFixedWidth(40)
+			self.denoise_dsa_color_amount = QLineEdit("0.5")
+			self.denoise_dsa_color_amount.setFixedWidth(40)
 			self.denoise_dsa_mode.setEnabled(False)
 			self.denoise_dsa_luma_amount.setEnabled(False)
 			self.denoise_dsa_color_amount.setEnabled(False)			
@@ -630,59 +735,75 @@ def run_gui():
 			self.denoise_dsa_cb.toggled.connect(self.denoise_dsa_luma_amount.setEnabled)
 			self.denoise_dsa_cb.toggled.connect(self.denoise_dsa_color_amount.setEnabled)			
 			denoise_dsa_layout = QHBoxLayout()
-			denoise_dsa_layout.addWidget(QLabel("Mode:"))
+			denoise_dsa_layout.setSpacing(10)
+			denoise_dsa_layout.addWidget(create_aligned_label("Mode"))
 			denoise_dsa_layout.addWidget(self.denoise_dsa_mode)
-			denoise_dsa_layout.addWidget(QLabel("Luma amount:"))
+			denoise_dsa_layout.addWidget(create_aligned_label("Luma"))
 			denoise_dsa_layout.addWidget(self.denoise_dsa_luma_amount)
-			denoise_dsa_layout.addWidget(QLabel("Color amount:"))
-			denoise_dsa_layout.addWidget(self.denoise_dsa_color_amount)			
-			form_layout.addRow(self.denoise_dsa_cb, denoise_dsa_layout)
+			denoise_dsa_layout.addWidget(create_aligned_label("Color"))
+			denoise_dsa_layout.addWidget(self.denoise_dsa_color_amount)
+			denoise_dsa_layout.addStretch()
+			add_aligned_row(denoise_form, self.denoise_dsa_cb, denoise_dsa_layout)
 
 			self.denoise_grax_cb = QCheckBox("GraXpert Denoise")
 			self.denoise_grax_strength = QLineEdit("0.5")
+			self.denoise_grax_strength.setFixedWidth(40)
 			self.denoise_grax_strength.setEnabled(False)
 			self.denoise_grax_cb.toggled.connect(self.denoise_grax_strength.setEnabled)
 			denoise_grax_layout = QHBoxLayout()
-			denoise_grax_layout.addWidget(QLabel("Strength:"))
+			denoise_grax_layout.setSpacing(10)
+			denoise_grax_layout.addWidget(create_aligned_label("Strength"))
 			denoise_grax_layout.addWidget(self.denoise_grax_strength)
-			form_layout.addRow(self.denoise_grax_cb, denoise_grax_layout)
+			denoise_grax_layout.addStretch()
+			add_aligned_row(denoise_form, self.denoise_grax_cb, denoise_grax_layout)
+			scroll_layout.addWidget(denoise_group)
 
-			blank_line = QFrame()
-			blank_line.setFixedHeight(10)  # Adjust height as needed
-			form_layout.addRow(blank_line) 
-
+			# --- 4. Finalization Group ---
+			final_group = QGroupBox("4. Stretch and/or Multiprocess")
+			final_form = QFormLayout(final_group)
 			self.autostretch_cb = QCheckBox("Autostretch (linked)")
-			form_layout.addRow(self.autostretch_cb)
+			self.autostretch_cb.setFixedWidth(250)
+			final_form.addRow(self.autostretch_cb)
 			
 			self.stretch_cb = QCheckBox("Statistical Stretch")
 			self.stretch_hdr_amount = QLineEdit("0.15")
 			self.stretch_hdr_knee = QLineEdit("0.75")
 			self.stretch_boost_amount = QLineEdit("0.2")
+			self.stretch_hdr_amount.setFixedWidth(80)
 			self.stretch_hdr_amount.setEnabled(False)
-			self.stretch_hdr_knee.setEnabled(False)
-			self.stretch_boost_amount.setEnabled(False)
+			for w in [self.stretch_hdr_knee, self.stretch_boost_amount]:
+				w.setFixedWidth(40)
+				w.setEnabled(False)
 			self.stretch_cb.toggled.connect(self.stretch_hdr_amount.setEnabled)
 			self.stretch_cb.toggled.connect(self.stretch_hdr_knee.setEnabled)
 			self.stretch_cb.toggled.connect(self.stretch_boost_amount.setEnabled)
 			stretch_layout = QHBoxLayout()
-			stretch_layout.addWidget(QLabel("HDR amount:"))
+			stretch_layout.setSpacing(10)
+			stretch_layout.addWidget(create_aligned_label("HDR"))
 			stretch_layout.addWidget(self.stretch_hdr_amount)
-			stretch_layout.addWidget(QLabel("HDR knee:"))
+			stretch_layout.addWidget(create_aligned_label("Knee"))
 			stretch_layout.addWidget(self.stretch_hdr_knee)
-			stretch_layout.addWidget(QLabel("Boost amount:"))
+			stretch_layout.addWidget(create_aligned_label("Boost"))
 			stretch_layout.addWidget(self.stretch_boost_amount)
-			form_layout.addRow(self.stretch_cb, stretch_layout)
+			stretch_layout.addStretch()
+			add_aligned_row(final_form, self.stretch_cb, stretch_layout)
 
-			self.multiprocess_cb = QCheckBox("Multiprocess")
-			form_layout.addRow(self.multiprocess_cb)
+			self.multiprocess_cb = QCheckBox("Multiprocess directories")
+			self.multiprocess_cb.setToolTip("Saves processed images in unique Processed_N directory")
+			self.multiprocess_cb.setFixedWidth(250)
+			final_form.addRow(self.multiprocess_cb)
+			scroll_layout.addWidget(final_group)
 
-			layout.addLayout(form_layout)
-
+			# --- Buttons ---
 			self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
 			self.button_box.accepted.connect(self.accept)
 			self.button_box.rejected.connect(self.reject)
-			layout.addWidget(self.button_box)
+			main_layout.addWidget(self.button_box)
 
+			# Initial UI updates
+			self.update_sharpen_cc_options(self.sharpen_cc_mode.currentText())
+			self.update_sharpen_ssa_options(self.sharpen_ssa_mode.currentText())
+		
 		def update_sharpen_cc_options(self, mode):
 			if mode == 'Both':
 				self.sharpen_cc_stellar_amount.setEnabled(True)
@@ -724,7 +845,7 @@ def run_gui():
 				"sharpenCC": [self.sharpen_cc_mode.currentText(), self.sharpen_cc_stellar_amount.text(), self.sharpen_cc_non_stellar_amount.text(), self.sharpen_cc_non_stellar_strength.text()] if self.sharpen_cc_cb.isChecked() else None,
 				"sharpenGraX": [self.sharpen_grax_mode.currentText(), self.sharpen_grax_strength.text()] if self.sharpen_grax_cb.isChecked() else None,
 				"sharpenSA": [self.sharpen_ssa_mode.currentText(), self.sharpen_ssa_stellar_amount.text(), self.sharpen_ssa_non_stellar_amount.text()] if self.sharpen_ssa_cb.isChecked() else None,
-				"starnet": self.recombine_factor.text() if self.starnet_cb.isChecked() else None,
+				"starnet": [self.scale_factor.text(), self.stride.text(), self.combine_factor.text()] if self.starnet_cb.isChecked() else None,
 				"synthstar": self.synthstar_cb.isChecked(),
 				"autostretch": self.autostretch_cb.isChecked(),				
 				"statstretch": [self.stretch_hdr_amount.text(), self.stretch_hdr_knee.text(), self.stretch_boost_amount.text()] if self.stretch_cb.isChecked() else None,
@@ -803,7 +924,7 @@ def run_gui():
 		if values["sharpenGraX"]:
 			cli_args.extend(["-sg", values["sharpenGraX"][0], values["sharpenGraX"][1]])
 		if values["starnet"]:
-			cli_args.extend(["-sn", values["starnet"]])
+			cli_args.extend(["-sn", values["starnet"][0], values["starnet"][1], values["starnet"][2]])
 		if values["synthstar"]:
 			cli_args.append("-sy")		
 		if values["autostretch"]:
@@ -842,11 +963,11 @@ def main_logic(argv):
 	parser.add_argument("-dg","--denoiseGraX", nargs='+', action='append', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
 	parser.add_argument("-dsa","--denoiseSA", nargs='+', action='append' ,help="run SASpro CC denoise, provide mode (full or luminance), luminance denoise strength (0.0-1.0) and color denoise strength (0.0-1.0)")
 	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
-	parser.add_argument("-m","--multiprocess", help="saves processed images in processed_N directory" ,action="store_true")	
+	parser.add_argument("-m","--multiprocess", help="saves processed images in unique Processed_N directory" ,action="store_true")	
 	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
 	parser.add_argument("-sc","--sharpenCC", nargs='+' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
-	parser.add_argument("-sn","--starnet", help="create starless & starmask images. Sharpen and/or denoise only runs starless, then combines starmask by provided factor.", required = True, type = float)
+	parser.add_argument("-sn","--starnet", nargs=3, help="create starless & starmask, sharpen and/or denoise run on starless, then recombines. Provide scale factor (1 or 2), stride value (default 256) and star combine factor (0-1)", type = float)
 	parser.add_argument("-sy","--synthstar", help="Runs synthstar on starmask to correct misshapen stars" ,action="store_true")	
 	parser.add_argument("-ssa","--sharpenSA", nargs='+', action='append' ,help="run SASpro CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount")
 	parser.add_argument("-ss","--statstretch", nargs='+', action='append', help="statistical stretch, provide HDR amount, HDR knee and boost amount")
