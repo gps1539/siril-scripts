@@ -29,6 +29,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.2.1   Add option to separate starmask and starless processing, with starmask combine factor 
 0.2.2   Add option to run synthstar on starmask and GUI improvements
 0.2.3   Add stride input for starnet
+0.2.4   Adds GUI to select SPCC sensors and filters
 """
 
 import sys
@@ -243,6 +244,35 @@ def denoise_SA(workdir):
 							siril.log(line)
 			process.wait()
 			processed_images.append(f"{image}")		
+
+def get_sensors_filters():
+		siril.connect()
+		siril.cmd("clear")
+		siril.cmd("SPCC_list", "oscsensor")
+		log = (siril.get_siril_log())
+		oscsensors = [((line.split(":",3)[3] if line.count(":")>=3 else line.split(":",1)[-1]).strip()) for line in log.replace("\x00","").splitlines()[2:] if line.strip()]
+		siril.cmd("clear")
+		siril.cmd("SPCC_list", "monosensor")
+		log = (siril.get_siril_log())
+		monosensors = [((line.split(":",3)[3] if line.count(":")>=3 else line.split(":",1)[-1]).strip()) for line in log.replace("\x00","").splitlines()[2:] if line.strip()]
+		siril.cmd("clear")
+		siril.cmd("SPCC_list", "oscfilter")
+		log = (siril.get_siril_log())
+		oscfilters = [((line.split(":",3)[3] if line.count(":")>=3 else line.split(":",1)[-1]).strip()) for line in log.replace("\x00","").splitlines()[2:] if line.strip()]
+		siril.cmd("clear")
+		siril.cmd("SPCC_list", "redfilter")
+		log = (siril.get_siril_log())
+		redfilters = [((line.split(":",3)[3] if line.count(":")>=3 else line.split(":",1)[-1]).strip()) for line in log.replace("\x00","").splitlines()[2:] if line.strip()]		
+		siril.cmd("clear")
+		siril.cmd("SPCC_list", "bluefilter")
+		log = (siril.get_siril_log())
+		bluefilters = [((line.split(":",3)[3] if line.count(":")>=3 else line.split(":",1)[-1]).strip()) for line in log.replace("\x00","").splitlines()[2:] if line.strip()]
+		siril.cmd("clear")
+		siril.cmd("SPCC_list", "greenfilter")
+		log = (siril.get_siril_log())
+		greenfilters = [((line.split(":",3)[3] if line.count(":")>=3 else line.split(":",1)[-1]).strip()) for line in log.replace("\x00","").splitlines()[2:] if line.strip()]		
+		siril.disconnect()
+		return oscsensors, monosensors, oscfilters, redfilters, bluefilters, greenfilters
 			
 def multiprocess(workdir):
 	os.chdir(workdir)
@@ -497,7 +527,7 @@ def run_gui():
 				return lbl
 
 			def add_aligned_row(form, checkbox, layout):
-				checkbox.setFixedWidth(220)
+				checkbox.setFixedWidth(200)
 				form.addRow(checkbox, layout)
 
 			# --- 1. Basic Setup Group ---
@@ -592,23 +622,34 @@ def run_gui():
 			bkg_grax_layout.addStretch()
 			add_aligned_row(basic_form, self.bkg_grax_cb, bkg_grax_layout)
 
-#			self.spcc_cb = QCheckBox("Siril SPCC")
-#			self.spcc_sensor = QLineEdit("")
-#			self.spcc_sensor.setPlaceholderText("sensor name")
-#			self.spcc_filters = QLineEdit("")
-#			self.spcc_filters.setPlaceholderText("filters OSC or R G B")
-#			self.spcc_sensor.setEnabled(False)
-#			self.spcc_filters.setEnabled(False)
-#			self.spcc_cb.toggled.connect(self.spcc_sensor.setEnabled)
-#			self.spcc_cb.toggled.connect(self.spcc_filters.setEnabled)
-#			spcc_layout = QHBoxLayout()
-#			spcc_layout.setSpacing(10)
-#			spcc_layout.addWidget(create_aligned_label("Sensor:"))
-#			spcc_layout.addWidget(self.spcc_sensor)
-#			spcc_layout.addWidget(create_aligned_label("Filter(s):"))
-#			spcc_layout.addWidget(self.spcc_filters)
-#			spcc_layout.addStretch()
-#			add_aligned_row(basic_form, self.spcc_cb, spcc_layout)
+			self.spcc_cb = QCheckBox("SPCC")
+			self.spcc_sensor = QComboBox()
+			self.spcc_sensor.setFixedWidth(80)
+			self.osc_cb = QCheckBox("OSC")
+			self.spcc_filter1 = QComboBox()
+			self.spcc_filter1.setFixedWidth(80)
+			self.spcc_filter2 = QComboBox()
+			self.spcc_filter2.setFixedWidth(80)
+			self.spcc_filter3 = QComboBox()
+			self.spcc_filter3.setFixedWidth(80)
+			self.spcc_sensor.setEnabled(False)
+			self.osc_cb.setEnabled(False)
+			self.spcc_filter1.setEnabled(False)
+			self.spcc_filter2.setEnabled(False)	
+			self.spcc_filter3.setEnabled(False)
+			self.spcc_cb.toggled.connect(self.on_spcc_toggled)
+			self.osc_cb.toggled.connect(lambda: self.on_spcc_toggled(self.spcc_cb.isChecked()))
+			spcc_layout = QHBoxLayout()
+			spcc_layout.setSpacing(10)
+			spcc_layout.addWidget(create_aligned_label("Sensor:"))
+			spcc_layout.addWidget(self.spcc_sensor)
+			spcc_layout.addWidget(self.osc_cb)
+			spcc_layout.addWidget(create_aligned_label("Filter(s):"))
+			spcc_layout.addWidget(self.spcc_filter1)
+			spcc_layout.addWidget(self.spcc_filter2)	
+			spcc_layout.addWidget(self.spcc_filter3)					
+			spcc_layout.addStretch()
+			add_aligned_row(basic_form, self.spcc_cb, spcc_layout)
 
 			scroll_layout.addWidget(basic_group)
 
@@ -829,6 +870,25 @@ def run_gui():
 				self.sharpen_ssa_stellar_amount.setEnabled(False)
 				self.sharpen_ssa_non_stellar_amount.setEnabled(True)
 
+		def on_spcc_toggled(self, checked):
+			self.spcc_sensor.setEnabled(checked)
+			self.osc_cb.setEnabled(checked)
+			self.spcc_filter1.setEnabled(checked)
+			self.spcc_filter2.setEnabled(checked)
+			self.spcc_filter3.setEnabled(checked)
+			if checked:
+				self.spcc_sensor.clear()
+				oscsensors, monosensors, oscfilters, redfilters, bluefilters, greenfilters  = get_sensors_filters()
+				if self.osc_cb.isChecked():
+					self.spcc_sensor.addItems(oscsensors)
+					self.spcc_filter1.addItems(oscfilters)
+					self.spcc_filter2.clear()
+					self.spcc_filter3.clear()					
+				else:
+					self.spcc_sensor.addItems(monosensors)
+					self.spcc_filter1.addItems(redfilters)
+					self.spcc_filter2.addItems(greenfilters)
+					self.spcc_filter3.addItems(bluefilters)
 		def get_values(self):
 			return {
 				"workdir": self.workdir_input.text(),
@@ -845,6 +905,8 @@ def run_gui():
 				"sharpenCC": [self.sharpen_cc_mode.currentText(), self.sharpen_cc_stellar_amount.text(), self.sharpen_cc_non_stellar_amount.text(), self.sharpen_cc_non_stellar_strength.text()] if self.sharpen_cc_cb.isChecked() else None,
 				"sharpenGraX": [self.sharpen_grax_mode.currentText(), self.sharpen_grax_strength.text()] if self.sharpen_grax_cb.isChecked() else None,
 				"sharpenSA": [self.sharpen_ssa_mode.currentText(), self.sharpen_ssa_stellar_amount.text(), self.sharpen_ssa_non_stellar_amount.text()] if self.sharpen_ssa_cb.isChecked() else None,
+				"spcc": [self.spcc_sensor.currentText(), self.spcc_filter1.currentText(), self.spcc_filter2.currentText(), self.spcc_filter3.currentText(), 
+						 'OSC' if self.osc_cb.isChecked() else 'mono'] if self.spcc_cb.isChecked() else None,
 				"starnet": [self.scale_factor.text(), self.stride.text(), self.combine_factor.text()] if self.starnet_cb.isChecked() else None,
 				"synthstar": self.synthstar_cb.isChecked(),
 				"autostretch": self.autostretch_cb.isChecked(),				
@@ -925,6 +987,11 @@ def run_gui():
 			cli_args.extend(["-sg", values["sharpenGraX"][0], values["sharpenGraX"][1]])
 		if values["starnet"]:
 			cli_args.extend(["-sn", values["starnet"][0], values["starnet"][1], values["starnet"][2]])
+		if values["spcc"]:
+			if values["spcc"][4] == 'OSC':
+				cli_args.extend(["-cc", values["spcc"][0], values["spcc"][1]])
+			else :
+				cli_args.extend(["-cc", values["spcc"][0], values["spcc"][1], values["spcc"][2], values["spcc"][3]])
 		if values["synthstar"]:
 			cli_args.append("-sy")		
 		if values["autostretch"]:
@@ -948,7 +1015,7 @@ def run_gui():
 # ==============================================================================	
 
 def main_logic(argv):
-	global args, npoints, crop, crop_value, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, starnet, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount, spcc_sensor, spcc_oscfilter, spcc_rfilter, spcc_gfilter, spcc_bfilter, Type
+	global args, npoints, crop, crop_value, polydegree, rbfsmooth, smooth, bkgGraX, denoiseCC_mode, denoiseCC_strength, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenCC_mode, sharpenCC_stellar_amount, sharpenCC_non_stellar_amount, sharpenCC_non_stellar_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, starnet, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount, spcc_sensor, spcc_oscfilter, spcc_rfilter, spcc_gfilter, spcc_bfilter, Type, sensors, osc_sensors, mono_sensors
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-ab","--abe", nargs='+', action='append', help="AutoBGE, provide npoints, polydegree and rbfsmooth")
