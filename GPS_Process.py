@@ -30,6 +30,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.2.2   Add option to run synthstar on starmask and GUI improvements
 0.2.3   Add stride input for starnet
 0.2.4   Adds GUI to select SPCC sensors and filters
+0.2.5	Run starnet after SPCC and bge
 """
 
 import sys
@@ -1062,26 +1063,6 @@ def main_logic(argv):
 		if args.crop:
 			crop(workdir)
 		
-		if args.starnet:
-			starnet(workdir)
-
-		if args.abe:
-			for n in args.abe:
-				npoints = (n[0])
-				polydegree = (n[1])
-				rbfsmooth = (n[2])
-				abe(workdir)
-				
-		if args.bkg:
-			for n in args.bkg:
-				smooth = (n[0])			
-				bkg(workdir)
-
-		if args.bkgGraX:
-			for n in args.bkgGraX:
-				bkgGraX = (n[0])
-				bkg_GraX(workdir)
-
 		if args.spcc:
 			spcc_sensor = (args.spcc[0])
 			if (len (args.spcc)) == 2:
@@ -1096,6 +1077,26 @@ def main_logic(argv):
 				print("spcc needs 2 args for OSC or 4 args for mono")
 				sys.exit(1)
 			spcc(workdir)			
+			
+		if args.abe:
+			for n in args.abe:
+				npoints = (n[0])
+				polydegree = (n[1])
+				rbfsmooth = (n[2])
+				abe(workdir)
+				
+		if args.bkg:
+			for n in args.bkg:
+				smooth = (n[0])			
+				bkg(workdir)
+
+		if args.starnet:
+			starnet(workdir)
+
+		if args.bkgGraX:
+			for n in args.bkgGraX:
+				bkgGraX = (n[0])
+				bkg_GraX(workdir)
 
 		if args.sharpen:
 			sharpen(workdir)
