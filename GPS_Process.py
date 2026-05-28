@@ -31,6 +31,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.2.3   Add stride input for starnet
 0.2.4   Adds GUI to select SPCC sensors and filters
 0.2.5	Run starnet after SPCC and bge
+0.2.6 	Add aberration correction to SetiAstroPro CC sharpen
 """
 
 import sys
@@ -41,7 +42,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.2.3"
+VERSION = "0.2.6"
 
 # PyQt6 for GUI
 try:
@@ -396,7 +397,7 @@ def sharpen_SA(workdir):
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
 			siril.log(image)
 			newimage = (f"{(image).rsplit('.', 1)[0]}_ssa-{sharpenSA_mode.rsplit( )[0]}-{sharpenSA_non_stellar_amount}-{sharpenSA_stellar_amount}.fit")
-			cmd = [python_path, executable_path, "cc", "sharpen", "--gpu", "--sharpening-mode", f"{sharpenSA_mode}", "--nonstellar-amount", f"{sharpenSA_non_stellar_amount}", "--stellar-amount", f"{sharpenSA_stellar_amount}", "--auto-psf", "-i", f"{image}", "-o", f"{newimage}"]
+			cmd = [python_path, executable_path, "cc", "sharpen", "--gpu", "--stellar-correct-mode", "correct_sharpen", "--sharpening-mode", f"{sharpenSA_mode}", "--nonstellar-amount", f"{sharpenSA_non_stellar_amount}", "--stellar-amount", f"{sharpenSA_stellar_amount}", "--auto-psf", "-i", f"{image}", "-o", f"{newimage}"]
 			print(" ".join(cmd))
 			
 			my_env = os.environ.copy()
