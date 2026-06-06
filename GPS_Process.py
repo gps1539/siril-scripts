@@ -32,6 +32,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.2.4   Adds GUI to select SPCC sensors and filters
 0.2.5	Run starnet after SPCC and bge
 0.2.6 	Add aberration correction to SetiAstroPro CC sharpen
+0.2.7	Add GUI to create excutable config file 
 """
 
 import sys
@@ -42,13 +43,13 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.2.6"
+VERSION = "0.2.7"
 
 # PyQt6 for GUI
 try:
 	from PyQt6.QtWidgets import (
 		QApplication, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox, QToolTip, QScrollArea,
-		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox, QFrame, QGroupBox, QWidget
+		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox, QFrame, QGroupBox, QWidget, QFileDialog
 	)
 except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
@@ -56,6 +57,21 @@ except ImportError:
 
 original_images = []
 processed_images = []
+
+def create_execute_config(config_file_path, ):
+	utility = config_file_path.split('_')[1].split('.')[0]
+	start_dir = ""  # e.g., "/home/user" or "" for default
+	file_filter = "All Files (*)"
+	file_path, _ = QFileDialog.getOpenFileName(parent=None, caption=f"Select the executable for {utility}", directory=start_dir, filter=file_filter)
+	
+	if file_path:
+		print("Selected file:", file_path)
+		with open(config_file_path, 'w') as file:
+			file.write(file_path)
+		sys.exit(0)
+	else:
+		print("No file selected")
+		sys.exit(0)
 
 # ==============================================================================
 # Prototype sirilpy processing script
@@ -141,9 +157,13 @@ def denoise_CC(workdir):
 			executable_path = file.readline().strip()
 			cc_input_dir = (executable_path.rsplit('/', 1)[0])+"/input"
 			cc_output_dir = (executable_path.rsplit('/', 1)[0])+"/output"
+
 	else:
-		print("Executable not yet configured. It is recommended to use Seti Astro Cosmic Clarity v5.4 or higher.")
-		sys.exit(1)
+		if len(sys.argv) == 1:
+			create_execute_config(f"{config_dir}/sirilcc_denoise.conf")
+		else:
+			print(f"Executable not configured. Please create file 'sirilcc_denoise.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
+			sys.exit(1)
 
 	os.chdir(cc_input_dir)
 	for oldimage in os.listdir():
@@ -214,9 +234,14 @@ def denoise_SA(workdir):
 		with open(config_file_path, 'r') as file:
 			executable_path = file.readline().strip()
 			python_path = executable_path.replace("setiastrosuitepro", "python")
+
 	else:
-		print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
-		sys.exit(1)
+		if len(sys.argv) == 1:
+			create_execute_config(f"{config_dir}/sirilcc_saspro.conf")
+			python_path = executable_path.replace("setiastrosuitepro", "python")			
+		else:
+			print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
+			sys.exit(1)
 		
 	for image in os.listdir():
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
@@ -327,9 +352,13 @@ def sharpen_CC(workdir):
 			executable_path = file.readline().strip()
 			cc_input_dir = (executable_path.rsplit('/', 1)[0])+"/input"
 			cc_output_dir = (executable_path.rsplit('/', 1)[0])+"/output"
+
 	else:
-		print("Executable not yet configured. It is recommended to use Seti Astro Cosmic Clarity v5.4 or higher.")
-		sys.exit(1)
+		if len(sys.argv) == 1:
+			create_execute_config(f"{config_dir}/sirilcc_sharpen.conf")
+		else:
+			print(f"Executable not configured. Please create file 'sirilcc_sharpen.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
+			sys.exit(1)
 
 	os.chdir(cc_input_dir)
 	for image in os.listdir():
@@ -390,8 +419,12 @@ def sharpen_SA(workdir):
 			executable_path = file.readline().strip()
 			python_path = executable_path.replace("setiastrosuitepro", "python")
 	else:
-		print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
-		sys.exit(1)
+		if len(sys.argv) == 1:
+			create_execute_config(f"{config_dir}/sirilcc_saspro.conf")
+			python_path = executable_path.replace("setiastrosuitepro", "python")			
+		else:
+			print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
+			sys.exit(1)
 		
 	for image in os.listdir():
 		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
@@ -1034,7 +1067,7 @@ def main_logic(argv):
 	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
 	parser.add_argument("-m","--multiprocess", help="saves processed images in unique Processed_N directory" ,action="store_true")	
 	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
-	parser.add_argument("-sc","--sharpenCC", nargs='+' ,help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
+	parser.add_argument("-sc","--sharpenCC", nargs='+', action='append', help="run CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount and Non_stellar_strength")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
 	parser.add_argument("-sn","--starnet", nargs=3, help="create starless & starmask, sharpen and/or denoise run on starless, then recombines. Provide scale factor (1 or 2), stride value (default 256) and star combine factor (0-1)", type = float)
 	parser.add_argument("-sy","--synthstar", help="Runs synthstar on starmask to correct misshapen stars" ,action="store_true")	

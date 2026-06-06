@@ -26,6 +26,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.6   Handle working directory with spaces
 0.1.7   Added tooltips
 0.1.8   Adds satellite removal using setiastropro AI4
+0.1.9	Add GUI to create excutable config file 
  
 """
 
@@ -37,17 +38,32 @@ import argparse
 import re
 import shlex
 
-VERSION = "0.1.8"
+VERSION = "0.1.9"
 	
 # PyQt6 for GUI
 try:
 	from PyQt6.QtWidgets import (
 		QApplication, QDialog, QLabel, QLineEdit, QPushButton, QCheckBox, QToolTip, QGroupBox,
-		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox, QTextEdit
+		QVBoxLayout, QHBoxLayout, QFormLayout, QDialogButtonBox, QMessageBox, QTextEdit, QFileDialog
 	)
 except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
 	pass
+
+def create_execute_config(config_file_path, ):
+	utility = config_file_path.split('_')[1].split('.')[0]
+	start_dir = ""  # e.g., "/home/user" or "" for default
+	file_filter = "All Files (*)"
+	file_path, _ = QFileDialog.getOpenFileName(parent=None, caption=f"Select the executable for {utility}", directory=start_dir, filter=file_filter)
+	
+	if file_path:
+		print("Selected file:", file_path)
+		with open(config_file_path, 'w') as file:
+			file.write(file_path)
+		sys.exit(0)
+	else:
+		print("No file selected")
+		sys.exit(0)	
 
 def master_bias(bias_dir, process_dir):
 	if os.path.exists(os.path.join(workdir, 'process/bias_stacked.fit')) or os.path.exists(os.path.join(workdir, 'process/bias_stacked.fit.fz')):
@@ -143,8 +159,11 @@ def satellite_removal(workdir):
 			executable_path = file.readline().strip()
 			python_path = executable_path.replace("setiastrosuitepro", "python")
 	else:
-		print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
-		sys.exit(1)
+		if len(sys.argv) == 1:
+			create_execute_config(f"{config_dir}/sirilcc_saspro.conf")
+		else:	
+			print(f"Executable not configured. Please create file 'sirilcc_saspro.conf' in your siril config directory {config_dir} with a line containing the path to setiastrosuitepro.")
+			sys.exit(1)
 
 	os.chdir(workdir)		
 	os.rename('lights', 'lights_preremoval')
