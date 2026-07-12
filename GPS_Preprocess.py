@@ -27,6 +27,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.7   Added tooltips
 0.1.8   Adds satellite removal using setiastropro AI4
 0.1.9	Add GUI to create excutable config file 
+0.2.0	Add clean option to delete previous process and cache directories
  
 """
 
@@ -36,9 +37,10 @@ import subprocess
 import sirilpy as s
 import argparse
 import re
+import shutil
 import shlex
 
-VERSION = "0.1.9"
+VERSION = "0.2.0"
 	
 # PyQt6 for GUI
 try:
@@ -50,6 +52,12 @@ except ImportError:
 	# Silently fail if PyQt6 is not installed, as it's optional for CLI mode.
 	pass
 
+def clean():
+	if os.path.isdir('process'):
+		shutil.rmtree('process')
+	if os.path.isdir('cache'):
+		shutil.rmtree('cache')
+		
 def create_execute_config(config_file_path, ):
 	utility = config_file_path.split('_')[1].split('.')[0]
 	start_dir = ""  # e.g., "/home/user" or "" for default
@@ -246,6 +254,9 @@ def run_gui():
 			self.no_calibration_cb = QCheckBox("No Calibration")
 			form_layout.addRow(self.no_calibration_cb)
 
+			self.clean_cb = QCheckBox("Clean process directory")
+			form_layout.addRow(self.clean_cb)
+			
 			self.bkg_extract_cb = QCheckBox("Background extraction")
 			form_layout.addRow(self.bkg_extract_cb)
 			
@@ -309,6 +320,7 @@ def run_gui():
 				"drizzle": self.drizzle_input.text() if self.drizzle.isChecked() else None,
 				"bkg_extract": self.bkg_extract_cb.isChecked(),
 				"platesolve": self.platesolve_input.text() if self.platesolve_cb.isChecked() and self.platesolve_input.text() else self.platesolve_cb.isChecked(),
+				"clean": self.clean_cb.isChecked(),
 				"no_calibration": self.no_calibration_cb.isChecked(),
 				"multi": shlex.split(self.multi_input.toPlainText()) if self.multi_group.isChecked() else False,
 			}
@@ -383,6 +395,8 @@ def run_gui():
 				cli_args.append(values["platesolve"])
 		if values["no_calibration"]:
 			cli_args.append("-nc")
+		if values["clean"]:
+			cli_args.append("-c")			
 		if values["multi"]:
 			cli_args.append("-m")
 			if isinstance(values["multi"], list):
@@ -405,6 +419,7 @@ def main_logic(argv):
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-b", "--background", nargs='+', help="background filter settings, XX%% or X")
 	parser.add_argument("-bg", "--bkg", help="extract background", action="store_true")
+	parser.add_argument("-c", "--clean", help="clean previous process directory", action="store_true")
 	parser.add_argument("-d", "--workdir", nargs='+', help="set working directory")
 	parser.add_argument("-f", "--feather", nargs='+', help="set feathering amount in px")
 	parser.add_argument("-m","--multi_session", nargs='+', help="Calibrates multiple sessions, provide working directory for each session")	
@@ -450,6 +465,9 @@ def main_logic(argv):
 		process_dir = os.path.join(workdir, 'process')
 		siril.cmd("set32bits")
 		siril.cmd("setext", "fit")
+
+		if args.clean:
+			clean()
 
 		if args.no_calibration:
 			light_nc(os.path.join(workdir, 'lights'), process_dir)
