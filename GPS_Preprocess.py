@@ -27,7 +27,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.7   Added tooltips
 0.1.8   Adds satellite removal using setiastropro AI4
 0.1.9	Add GUI to create excutable config file 
-0.2.0	Add clean option to delete previous process and cache directories
+0.2.0	Add clean option to delete process and cache directories proir to preprocessing.
  
 """
 
