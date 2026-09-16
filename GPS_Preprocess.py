@@ -28,7 +28,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.8   Adds satellite removal using setiastropro AI4
 0.1.9	Add GUI to create excutable config file 
 0.2.0	Add clean option to delete process and cache directories proir to preprocessing.
-0.2.1	Use Gaussian model for drizzle 
+0.2.1	Use Gaussian model for drizzle and read focal length from fits header
  
 """
 
@@ -143,7 +143,9 @@ def platesolve(process_dir):
 			return
 	siril.cmd("cd " + process_dir)
 	if args.platesolve == True :
-		focal = " "
+#		focal = " "
+		siril.cmd("load pp_light_00001")
+		focal = (f"-focal={siril.get_image_fits_header(return_as='dict')['FOCALLEN']}")
 	else:
 		focal = (f"-focal={args.platesolve}")		
 	siril.cmd(f"seqplatesolve {light_seq} -nocache -catalog=nomad -force -disto=ps_distortion {focal}")
@@ -445,7 +447,6 @@ def main_logic(argv):
 	if args.drizzle:
 		drizzle_scale = args.drizzle[0]
 		pix_frac = str(1 / float(drizzle_scale))
-#		drizzle = f"-kernel=square -drizzle -scale={drizzle_scale} -pixfrac={pix_frac}"
 		drizzle = f"-kernel=gaussian -drizzle -scale={drizzle_scale} -pixfrac={pix_frac}"
 	else:
 		drizzle, drizzle_scale = " ", 0
