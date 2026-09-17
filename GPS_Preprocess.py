@@ -145,7 +145,7 @@ def platesolve(process_dir):
 	if args.platesolve == True :
 #		focal = " "
 		siril.cmd("load pp_light_00001")
-		focal = (f"-focal={siril.get_image_fits_header(return_as='dict')['FOCALLEN']}")
+		focal = (f"-focal={int(siril.get_image_fits_header(return_as='dict')['FOCALLEN'])}")
 	else:
 		focal = (f"-focal={args.platesolve}")		
 	siril.cmd(f"seqplatesolve {light_seq} -nocache -catalog=nomad -force -disto=ps_distortion {focal}")
