@@ -34,6 +34,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.2.6 	Add aberration correction to SetiAstroPro CC sharpen
 0.2.7	Add GUI to create executable config file
 0.2.8   Removes CosmicClarity denoise and sharpen, adds AutoGradientRemoval
+0.2.9   Add SyQon starless, sharpen and denoise. Removes synthstar   
 """
 
 import sys
@@ -44,7 +45,7 @@ import sirilpy as s
 import argparse
 import re
 
-VERSION = "0.2.8"
+VERSION = "0.2.9"
 
 # PyQt6 for GUI
 try:
@@ -171,6 +172,17 @@ def denoise_GraX(workdir):
 			siril.cmd("save", newimage)
 			processed_images.append(f"{image}")
 
+def denoise_SyQon(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log("Starting Prism denoise on " + image)
+			siril.cmd("load", image)
+			siril.cmd(f"pyscript Prism.py --modulation {denoise_SyQon_strength} --tile-size 512 --overlap 64 --pad 96 --stretch-method statistical --stretch-target 0.25")
+			newimage = (f"{(image).rsplit('.', 1)[0]}_dsy-{denoise_SyQon_strength}")
+			siril.cmd("save", newimage)
+			processed_images.append(f"{image}")
+
 def denoise_SA(workdir):
 	os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 	config_dir = siril.get_siril_configdir()
@@ -263,13 +275,16 @@ def multiprocess(workdir):
 
 def pixelmath(workdir):
 	os.chdir(workdir)
-	combine_factor = (args.starnet[2])
+	if args.starnet is not None:
+		combine_factor = args.starnet[2]
+	else: 
+		combine_factor = args.starless[2]
 	for starmask in os.listdir():
-		if starmask.startswith("starmask"):
+		if starmask.startswith(("starnetmask", "starmask")):
 			stars = starmask
-	for image in os.listdir():
-		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:	
-			less = image
+	for starless in os.listdir():
+		if starless.startswith("starless"):	
+			less = starless
 	siril.cmd(f"PM '${less}$ + (${stars}$ * {combine_factor}) / 1 + ${less}$ * ${stars}$'")
 	newimage = f"{os.path.splitext(less.removeprefix('starless_'))[0]}_combined"
 	siril.cmd("save", newimage)
@@ -350,6 +365,17 @@ def sharpen_GraX(workdir):
 			siril.cmd("save", newimage)
 			processed_images.append(f"{image}")
 
+def sharpenSyQon(workdir):
+	os.chdir(workdir)
+	for image in os.listdir():
+		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
+			siril.log("Starting Parallax sharpen on " + image)
+			siril.cmd("load", image)
+			siril.cmd(f"pyscript Parallax.py --star-level {sharpenSyQon_star} --sharpen {sharpenSyQon_nebula} --linked --overlap 64 --tile 512 --pad 96")			
+			newimage = (f"{(image).rsplit('.', 1)[0]}_ssy-{sharpenSyQon_star}-{sharpenSyQon_nebula}")
+			siril.cmd("save", newimage)
+			processed_images.append(f"{image}")
+
 def spcc(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
@@ -369,29 +395,32 @@ def spcc(workdir):
 
 def starnet(workdir):
 	os.chdir(workdir)
-	for image in os.listdir():
-		if image.endswith(('.fits', '.fit', '.fts', '.fz')) and image not in processed_images:
-			siril.log("Running starnet on " + image)
-			siril.cmd("load", image)
-			if args.starnet[0] == 2:
-				upscale = '-upscale'
-			elif args.starnet[0] == 1:
-				upscale = ''
-			else:
-				print("Upscale factor needs to be a 1 or 2")
-				sys.exit(1)
-			stride = int(args.starnet[1])
-			siril.cmd(f"starnet -stretch {upscale} -stride={stride}")
-			for starmask in os.listdir():
-				if starmask.startswith("starmask"):
-					siril.cmd("load", starmask)
-					if args.synthstar:
-						siril.cmd("synthstar")
-					siril.cmd("gauss 1.2")
-					siril.cmd("save", starmask)
-					processed_images.append(f"{starmask}")
-			processed_images.append(f"{image}")
+	image = max((entry for entry in os.scandir(workdir) if entry.is_file()), key=lambda entry: entry.stat().st_mtime, default=None).name
+	siril.log("Running starnet on " + image)
+	siril.cmd("load", image)
+	if args.starnet[0] == 2:
+		upscale = '--upsample'
+	elif args.starnet[0] == 1:
+		upscale = ''
+	else:
+		print("Upscale factor needs to be a 1 or 2")
+		sys.exit(1)
+	stride = int(args.starnet[1])
+	siril.cmd(f"pyscript StarNet.py {upscale} --stride {stride} --linear")
+	newimage = (f"starless_{os.path.splitext(image)[0]}")
+	siril.cmd("save", newimage)
+	processed_images.append(f"{image}")
 
+def starless(workdir):
+	os.chdir(workdir)
+	image = max((entry for entry in os.scandir(workdir) if entry.is_file()), key=lambda entry: entry.stat().st_mtime, default=None).name
+	siril.log("Running starless on " + image)
+	siril.cmd("load", image)
+	tilesize = int(args.starless[0])
+	overlap = int(args.starless[1])
+	siril.cmd(f"pyscript Starless.py --tile-size {tilesize} --overlap {overlap}")
+	processed_images.append(f"{image}")
+			
 def statstretch(workdir):
 	os.chdir(workdir)
 	for image in os.listdir():
@@ -460,6 +489,30 @@ def run_gui():
 			crop_layout.addStretch()
 			add_aligned_row(basic_form, self.crop_cb, crop_layout)
 
+			self.starless_cb = QCheckBox("Starless")
+			self.tilesize = QLineEdit("512")
+			self.tilesize.setFixedWidth(40)
+			self.tilesize.setEnabled(False)
+			self.overlap = QLineEdit("64")
+			self.overlap.setFixedWidth(40)
+			self.overlap.setEnabled(False)
+			self.combine_factor = QLineEdit("0.5")
+			self.combine_factor.setFixedWidth(40)
+			self.combine_factor.setEnabled(False)
+			self.starless_cb.toggled.connect(self.tilesize.setEnabled)
+			self.starless_cb.toggled.connect(self.overlap.setEnabled)
+			self.starless_cb.toggled.connect(self.combine_factor.setEnabled)
+			starless_layout = QHBoxLayout()
+			starless_layout.setSpacing(10)
+			starless_layout.addWidget(create_aligned_label("Tile size"))
+			starless_layout.addWidget(self.tilesize)
+			starless_layout.addWidget(create_aligned_label("Overlap"))
+			starless_layout.addWidget(self.overlap)
+			starless_layout.addWidget(create_aligned_label("Star factor:"))
+			starless_layout.addWidget(self.combine_factor)
+			starless_layout.addStretch()
+			add_aligned_row(basic_form, self.starless_cb, starless_layout)
+			
 			self.starnet_cb = QCheckBox("Starnet")
 			self.scale_factor = QLineEdit("1")
 			self.scale_factor.setFixedWidth(40)
@@ -470,12 +523,9 @@ def run_gui():
 			self.combine_factor = QLineEdit("0.5")
 			self.combine_factor.setFixedWidth(40)
 			self.combine_factor.setEnabled(False)
-			self.synthstar_cb = QCheckBox("Synthstar")
-			self.synthstar_cb.setEnabled(False)
 			self.starnet_cb.toggled.connect(self.scale_factor.setEnabled)
 			self.starnet_cb.toggled.connect(self.stride.setEnabled)
 			self.starnet_cb.toggled.connect(self.combine_factor.setEnabled)
-			self.starnet_cb.toggled.connect(self.synthstar_cb.setEnabled)
 			starnet_layout = QHBoxLayout()
 			starnet_layout.setSpacing(10)
 			starnet_layout.addWidget(create_aligned_label("Scale"))
@@ -484,7 +534,6 @@ def run_gui():
 			starnet_layout.addWidget(self.stride)
 			starnet_layout.addWidget(create_aligned_label("Star factor:"))
 			starnet_layout.addWidget(self.combine_factor)
-			starnet_layout.addWidget(self.synthstar_cb)
 			starnet_layout.addStretch()
 			add_aligned_row(basic_form, self.starnet_cb, starnet_layout)
 
@@ -651,6 +700,24 @@ def run_gui():
 			add_aligned_row(sharpen_form, self.sharpen_grax_cb, sharpen_grax_layout)
 			scroll_layout.addWidget(sharpen_group)
 
+			self.sharpen_syqon_cb = QCheckBox("Parallax Sharpen")
+			self.sharpen_syqon_star_strength = QLineEdit("2.0")
+			self.sharpen_syqon_nebula_strength = QLineEdit("0.5")
+			for w in [self.sharpen_syqon_star_strength, self.sharpen_syqon_nebula_strength]:
+				w.setFixedWidth(40)
+				w.setEnabled(False)
+			self.sharpen_syqon_cb.toggled.connect(self.sharpen_syqon_star_strength.setEnabled)
+			self.sharpen_syqon_cb.toggled.connect(self.sharpen_syqon_nebula_strength.setEnabled)
+			sharpen_syqon_layout = QHBoxLayout()
+			sharpen_syqon_layout.setSpacing(10)
+			sharpen_syqon_layout.addWidget(create_aligned_label("Star"))
+			sharpen_syqon_layout.addWidget(self.sharpen_syqon_star_strength)	
+			sharpen_syqon_layout.addWidget(create_aligned_label("Nebula"))
+			sharpen_syqon_layout.addWidget(self.sharpen_syqon_nebula_strength)
+			sharpen_syqon_layout.addStretch()
+			add_aligned_row(sharpen_form, self.sharpen_syqon_cb, sharpen_syqon_layout)
+			scroll_layout.addWidget(sharpen_group)
+
 			# --- 3. Denoising Group ---
 			denoise_group = QGroupBox("3. Denoising")
 			denoise_form = QFormLayout(denoise_group)
@@ -682,6 +749,19 @@ def run_gui():
 			denoise_dsa_layout.addWidget(self.denoise_dsa_color_amount)
 			denoise_dsa_layout.addStretch()
 			add_aligned_row(denoise_form, self.denoise_dsa_cb, denoise_dsa_layout)
+
+			self.denoise_syqon_cb = QCheckBox("Prism Denoise")
+			self.denoise_syqon_strength = QLineEdit("100")
+			self.denoise_syqon_strength.setFixedWidth(40)
+			self.denoise_syqon_strength.setEnabled(False)
+			self.denoise_syqon_cb.toggled.connect(self.denoise_syqon_strength.setEnabled)
+			denoise_syqon_layout = QHBoxLayout()
+			denoise_syqon_layout.setSpacing(10)
+			denoise_syqon_layout.addWidget(create_aligned_label("Strength"))
+			denoise_syqon_layout.addWidget(self.denoise_syqon_strength)
+			denoise_syqon_layout.addStretch()
+			add_aligned_row(denoise_form, self.denoise_syqon_cb, denoise_syqon_layout)
+			scroll_layout.addWidget(denoise_group)
 
 			self.denoise_grax_cb = QCheckBox("GraXpert Denoise")
 			self.denoise_grax_strength = QLineEdit("0.5")
@@ -782,14 +862,16 @@ def run_gui():
 				"denoise": self.denoise_cb.isChecked(),
 				"denoiseSA": [self.denoise_dsa_mode.currentText(), self.denoise_dsa_luma_amount.text(), self.denoise_dsa_color_amount.text()] if self.denoise_dsa_cb.isChecked() else None,
 				"denoiseGraX": self.denoise_grax_strength.text() if self.denoise_grax_cb.isChecked() else None,
+				"denoisesyqon": self.denoise_syqon_strength.text() if self.denoise_syqon_cb.isChecked() else None,
 				"multiprocess": self.multiprocess_cb.isChecked(),
 				"sharpen": self.sharpen_cb.isChecked(),
 				"sharpenGraX": [self.sharpen_grax_mode.currentText(), self.sharpen_grax_strength.text()] if self.sharpen_grax_cb.isChecked() else None,
 				"sharpenSA": [self.sharpen_ssa_mode.currentText(), self.sharpen_ssa_stellar_amount.text(), self.sharpen_ssa_non_stellar_amount.text()] if self.sharpen_ssa_cb.isChecked() else None,
+				"sharpenSyQon": [self.sharpen_syqon_star_strength.text(), self.sharpen_syqon_nebula_strength.text()] if self.sharpen_syqon_cb.isChecked() else None,				
 				"spcc": [self.spcc_sensor.currentText(), self.spcc_filter1.currentText(), self.spcc_filter2.currentText(), self.spcc_filter3.currentText(), 
 						 'OSC' if self.osc_cb.isChecked() else 'mono'] if self.spcc_cb.isChecked() else None,
+				"starless": [self.tilesize.text(), self.overlap.text(), self.combine_factor.text()] if self.starless_cb.isChecked() else None,
 				"starnet": [self.scale_factor.text(), self.stride.text(), self.combine_factor.text()] if self.starnet_cb.isChecked() else None,
-				"synthstar": self.synthstar_cb.isChecked(),
 				"autostretch": self.autostretch_cb.isChecked(),				
 				"statstretch": [self.stretch_hdr_amount.text(), self.stretch_hdr_knee.text(), self.stretch_boost_amount.text()] if self.stretch_cb.isChecked() else None,
 			}
@@ -858,12 +940,18 @@ def run_gui():
 			cli_args.extend(["-dsa", values["denoiseSA"][0], values["denoiseSA"][1], values["denoiseSA"][2]])
 		if values["denoiseGraX"]:
 			cli_args.extend(["-dg", values["denoiseGraX"]])
+		if values["denoisesyqon"]:
+			cli_args.extend(["-dsy", values["denoisesyqon"]])			
 		if values["sharpen"]:
 			cli_args.append("-s")
 		if values["sharpenSA"]:
 			cli_args.extend(["-ssa", values["sharpenSA"][0], values["sharpenSA"][1], values["sharpenSA"][2]])		
 		if values["sharpenGraX"]:
 			cli_args.extend(["-sg", values["sharpenGraX"][0], values["sharpenGraX"][1]])
+		if values["sharpenSyQon"]:
+			cli_args.extend(["-ssy", values["sharpenSyQon"][0], values["sharpenSyQon"][1]])
+		if values["starless"]:
+			cli_args.extend(["-nsy", values["starless"][0], values["starless"][1], values["starless"][2]])
 		if values["starnet"]:
 			cli_args.extend(["-sn", values["starnet"][0], values["starnet"][1], values["starnet"][2]])
 		if values["spcc"]:
@@ -871,8 +959,6 @@ def run_gui():
 				cli_args.extend(["-cc", values["spcc"][0], values["spcc"][1]])
 			else :
 				cli_args.extend(["-cc", values["spcc"][0], values["spcc"][1], values["spcc"][2], values["spcc"][3]])
-		if values["synthstar"]:
-			cli_args.append("-sy")		
 		if values["autostretch"]:
 			cli_args.append("-as")
 		if values["statstretch"]:
@@ -894,7 +980,7 @@ def run_gui():
 # ==============================================================================	
 
 def main_logic(argv):
-	global args, npoints, crop, crop_value, polydegree, rbfsmooth, smooth, bkgGraX, denoiseGraX, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, autostretch, starnet, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount, spcc_sensor, spcc_oscfilter, spcc_rfilter, spcc_gfilter, spcc_bfilter, Type, sensors, osc_sensors, mono_sensors, scale, smoothness, protect_threshold, protect_amount, downsample
+	global args, npoints, crop, crop_value, polydegree, rbfsmooth, smooth, bkgGraX, denoiseGraX, denoise_SyQon_strength, denoiseSA_mode, denoiseSA_luma_amount, denoiseSA_color_amount, sharpenGraX_mode, sharpenGraX_strength, sharpenSA_mode, sharpenSA_stellar_amount, sharpenSA_non_stellar_amount, sharpenSyQon_star, sharpenSyQon_nebula, autostretch, starnet, starless, stretch_hdr_amount, stretch_hdr_knee, stretch_boost_amount, spcc_sensor, spcc_oscfilter, spcc_rfilter, spcc_gfilter, spcc_bfilter, Type, sensors, osc_sensors, mono_sensors, scale, smoothness, protect_threshold, protect_amount, downsample
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-ab","--abe", nargs='+', action='append', help="AutoBGE, provide npoints, polydegree and rbfsmooth")
@@ -907,12 +993,14 @@ def main_logic(argv):
 	parser.add_argument("-d","--workdir", nargs='+', help="set working directory")
 	parser.add_argument("-dg","--denoiseGraX", nargs='+', action='append', help="denoise using GraXpert-AI, provide strength 0.0-1.0")
 	parser.add_argument("-dsa","--denoiseSA", nargs='+', action='append' ,help="run SASpro CC denoise, provide mode (full or luminance), luminance denoise strength (0.0-1.0) and color denoise strength (0.0-1.0)")
+	parser.add_argument("-dsy","--denoiseSyQon", nargs='+', action='append' ,help="run Prism denoise, provide strength (0.0-100)")	
 	parser.add_argument("-ds","--denoise", help="run denoise" ,action="store_true")
 	parser.add_argument("-m","--multiprocess", help="saves processed images in unique Processed_N directory" ,action="store_true")	
+	parser.add_argument("-nsy","--starless", nargs='+', help="Runs syqon starless to starless & starmask, provide tile-size and overlap")
 	parser.add_argument("-s","--sharpen", help="sharpen (deconvolution)" ,action="store_true")
 	parser.add_argument("-sg","--sharpenGraX", nargs='+', action='append', help="sharpen (deconvolution) using GraXpert-AI, provide mode (both, object, stellar) and strength 0.0-1.0")
+	parser.add_argument("-ssy","--sharpenSyQon", nargs='+', action='append', help="sharpen (deconvolution) using SyQon Parallax, provide star sharpen (0-5) and nebula sharpen (0-2) levels")	
 	parser.add_argument("-sn","--starnet", nargs=3, help="create starless & starmask, sharpen and/or denoise run on starless, then recombines. Provide scale factor (1 or 2), stride value (default 256) and star combine factor (0-1)", type = float)
-	parser.add_argument("-sy","--synthstar", help="Runs synthstar on starmask to correct misshapen stars" ,action="store_true")	
 	parser.add_argument("-ssa","--sharpenSA", nargs='+', action='append' ,help="run SASpro CC sharpen, provide mode (Stellar Only,Non-Stellar Only,Both), Stellar_amount and/or Non_stellar_amount")
 	parser.add_argument("-ss","--statstretch", nargs='+', action='append', help="statistical stretch, provide HDR amount, HDR knee and boost amount")
 	parser.add_argument("-v","--version", help="print the version and exit",action="store_true")
@@ -975,9 +1063,6 @@ def main_logic(argv):
 				smooth = (n[0])			
 				bkg(workdir)
 
-		if args.starnet:
-			starnet(workdir)
-
 		if args.bkgGraX:
 			for n in args.bkgGraX:
 				bkgGraX = (n[0])
@@ -991,6 +1076,12 @@ def main_logic(argv):
 				sharpenGraX_mode = (n[0])
 				sharpenGraX_strength = (n[1])
 				sharpen_GraX(workdir)
+
+		if args.sharpenSyQon:
+			for n in args.sharpenSyQon:
+				sharpenSyQon_star = (n[0])
+				sharpenSyQon_nebula = (n[1])
+				sharpenSyQon(workdir)
 
 		if args.sharpenSA:
 			for n in args.sharpenSA:			
@@ -1024,7 +1115,18 @@ def main_logic(argv):
 				denoiseGraX = (n[0])
 				denoise_GraX(workdir)
 
+		if args.denoiseSyQon:
+			for n in args.denoiseSyQon:
+				denoise_SyQon_strength = (n[0])
+				denoise_SyQon(workdir)
+
 		if args.starnet:
+			starnet(workdir)
+
+		if args.starless:
+			starless(workdir)
+
+		if args.starnet or args.starless:
 			pixelmath(workdir)
 
 		if args.autostretch:
