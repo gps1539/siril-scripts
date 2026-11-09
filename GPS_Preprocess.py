@@ -29,6 +29,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 0.1.9	Add GUI to create excutable config file 
 0.2.0	Add clean option to delete process and cache directories proir to preprocessing.
 0.2.1	Use Gaussian model for drizzle and read focal length from fits header
+0.2.2	Performance improvement, 16 bit and gzip2 compression until stacking, then 32 bit & no compression
  
 """
 
@@ -41,7 +42,7 @@ import re
 import shutil
 import shlex
 
-VERSION = "0.2.0"
+VERSION = "0.2.2"
 	
 # PyQt6 for GUI
 try:
@@ -207,6 +208,8 @@ def satellite_removal(workdir):
 			process.wait()
 
 def stack(process_dir):
+	siril.cmd("set32bits")
+	siril.cmd("setcompress 0")
 	siril.cmd(f"cd {process_dir}")
 	siril.cmd("load pp_light_00001")
 	try:
@@ -466,7 +469,8 @@ def main_logic(argv):
 
 		siril.cmd("cd", workdir)
 		process_dir = os.path.join(workdir, 'process')
-		siril.cmd("set32bits")
+		siril.cmd("set16bits")
+		siril.cmd("setcompress 1 -type=gzip2 0")
 		siril.cmd("setext", "fit")
 
 		if args.clean:
