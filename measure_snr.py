@@ -701,7 +701,7 @@ def analyze_directory(directory, workers=None, reject_pct=None):
     print("=" * 70)
 
     rows = []
-    snrs, stars, rounds, fwhms = [], [], [], []
+    snrs, rounds, fwhms = [], [], []
     max_name_len = 0
     max_type_len = 0
     for fpath, res in all_results:
@@ -709,17 +709,15 @@ def analyze_directory(directory, workers=None, reject_pct=None):
         name = os.path.basename(fpath)
         max_name_len = max(max_name_len, len(name))
         snr = float(s.get('snr_bg_db', s.get('lum_snr_bg_db', 0)) or 0)
-        nstars = int(s.get('star_count', 0) or 0)
         rnd = float(s.get('star_roundness_avg', 0) or 0)
         fwhm = float(s.get('star_fwhm_avg', 0) or 0)
         ftype = str(s.get('type', '?'))
         max_type_len = max(max_type_len, len(ftype))
-        snrs.append(snr); stars.append(nstars); rounds.append(rnd); fwhms.append(fwhm)
+        snrs.append(snr); rounds.append(rnd); fwhms.append(fwhm)
         rows.append({
             'name': name,
             'type': ftype,
             'snr': snr,
-            'stars': nstars,
             'roundness': rnd,
             'fwhm': fwhm,
             'quality': 0.0,
@@ -728,21 +726,19 @@ def analyze_directory(directory, workers=None, reject_pct=None):
     # Composite quality score: normalize each metric to 0-1, average.
     # Higher quality = better for stacking. FWHM inverted (lower is better).
     max_snr = max(snrs) if snrs else 0.0
-    max_stars = max(stars) if stars else 0.0
     max_fwhm = max(fwhms) if fwhms else 0.0
     for row in rows:
         q_snr = row['snr'] / max_snr if max_snr > 0 else 0.0
-        q_stars = row['stars'] / max_stars if max_stars > 0 else 0.0
         q_round = row['roundness']
         q_fwhm = (1.0 - row['fwhm'] / max_fwhm) if max_fwhm > 0 else 0.0
-        row['quality'] = float(np.clip((q_snr + q_stars + q_round + q_fwhm) / 4.0, 0.0, 1.0))
+        row['quality'] = float(np.clip((q_snr + q_round + q_fwhm) / 3.0, 0.0, 1.0))
 
     # Build format strings with dynamic file/type column widths (no truncation).
     fwidth = max(max_name_len, len("AVERAGE"))
     twidth = max(max_type_len, len("Type"))
-    f_row = lambda row: f"{row['name']:<{fwidth}} {row['type']:<{twidth}} {row['snr']:>9.2f} {row['stars']:>6} {row['roundness']:>10.3f} {row['fwhm']:>8.2f} {row['quality']:>8.3f}"
-    f_avg = f"{'AVERAGE':<{fwidth}} {'':<{twidth}} {float(np.mean(snrs)):>9.2f} {float(np.mean(stars)):>6.1f} {float(np.mean(rounds)):>10.3f} {float(np.mean(fwhms)):>8.2f} {float(np.mean([r['quality'] for r in rows])):>8.3f}"
-    header = f"{'File':<{fwidth}} {'Type':<{twidth}} {'SNR(dB)':>9} {'Stars':>6} {'Roundness':>10} {'FWHM':>8} {'Quality':>8}"
+    f_row = lambda row: f"{row['name']:<{fwidth}} {row['type']:<{twidth}} {row['snr']:>9.2f} {row['roundness']:>10.3f} {row['fwhm']:>8.2f} {row['quality']:>8.3f}"
+    f_avg = f"{'AVERAGE':<{fwidth}} {'':<{twidth}} {float(np.mean(snrs)):>9.2f} {float(np.mean(rounds)):>10.3f} {float(np.mean(fwhms)):>8.2f} {float(np.mean([r['quality'] for r in rows])):>8.3f}"
+    header = f"{'File':<{fwidth}} {'Type':<{twidth}} {'SNR(dB)':>9} {'Roundness':>10} {'FWHM':>8} {'Quality':>8}"
 
     print("\n" + "=" * len(header))
     print("                         DIRECTORY SUMMARY")
