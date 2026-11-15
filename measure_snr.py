@@ -467,7 +467,7 @@ def analyze_fits(filepath, workers=None, dtype=np.float32, quiet=False):
 
     out_lines = []
     out_lines.append(f"Opening {filepath}...")
-    with fits.open(filepath, memmap=True) as hdul:
+    with fits.open(filepath, memmap=False) as hdul:
         # Capture HDU info string cleanly
         import io
         buf = io.StringIO()
