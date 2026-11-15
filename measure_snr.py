@@ -35,13 +35,26 @@ def format_val(val):
         return f"{val:.4e}"
 
 
+def _fast_median_1d(a):
+    """Median of a 1D array via a single partition (no NaN/axis wrapper overhead).
+
+    Caller guarantees ``a`` is 1-D, non-empty, and free of NaN.
+    """
+    n = len(a)
+    k = n // 2
+    if n & 1:
+        return float(np.partition(a, k)[k])
+    part = np.partition(a, [k - 1, k])
+    return float((part[k - 1] + part[k]) * 0.5)
+
+
 def compute_diff_noise_h(img, target_samples=300000):
     """Computes high-frequency horizontal neighbor difference noise (Donoho/Wavelet MAD estimator)."""
     h, w = img.shape
     step = max(1, (h * w) // target_samples)
     diff_h = (img[::step, 1:] - img[::step, :-1]).ravel()
-    med_h = float(np.median(diff_h))
-    mad_h = 1.4826 * float(np.median(np.abs(diff_h - med_h)))
+    med_h = float(_fast_median_1d(diff_h))
+    mad_h = 1.4826 * float(_fast_median_1d(np.abs(diff_h - med_h)))
     return float(mad_h / np.sqrt(2.0))
 
 
@@ -51,8 +64,8 @@ def compute_diff_noise_v(img, target_samples=300000):
     step = max(1, (h * w) // target_samples)
     # Adjacent vertical rows (k+1 and k) stream contiguously in memory for max CPU cache efficiency
     diff_v = (img[1::step, :] - img[:-1:step, :]).ravel()
-    med_v = float(np.median(diff_v))
-    mad_v = 1.4826 * float(np.median(np.abs(diff_v - med_v)))
+    med_v = float(_fast_median_1d(diff_v))
+    mad_v = 1.4826 * float(_fast_median_1d(np.abs(diff_v - med_v)))
     return float(mad_v / np.sqrt(2.0))
 
 
@@ -72,15 +85,15 @@ def compute_bg_and_sigma_clip(img):
     else:
         sample = img.ravel()
 
-    # 1. Basic Stats (mean & std from representative sample avoids 130MB temporary array allocations)
-    min_val = float(np.min(img))
-    max_val = float(np.max(img))
+    # 1. Basic Stats (all from representative sample avoids extra full-image passes)
+    min_val = float(np.min(sample))
+    max_val = float(np.max(sample))
     mean_val = float(np.mean(sample))
     std_val = float(np.std(sample))
 
     # 2. Robust Background & Noise Estimation (MAD) on spatial grid subsample
-    median_val = float(np.median(sample))
-    mad = float(np.median(np.abs(sample - median_val)))
+    median_val = float(_fast_median_1d(sample))
+    mad = float(_fast_median_1d(np.abs(sample - median_val)))
     sigma_mad = 1.4826 * mad
 
     # 3. Iterative Sigma-Clipped Background
@@ -92,8 +105,8 @@ def compute_bg_and_sigma_clip(img):
         valid = sample[mask]
         if len(valid) == 0:
             break
-        med = float(np.median(valid))
-        curr_mad = 1.4826 * float(np.median(np.abs(valid - med)))
+        med = float(_fast_median_1d(valid))
+        curr_mad = 1.4826 * float(_fast_median_1d(np.abs(valid - med)))
         new_mask = (sample >= med - 3 * curr_mad) & (sample <= med + 3 * curr_mad)
         if np.array_equal(new_mask, mask):
             break
@@ -102,7 +115,7 @@ def compute_bg_and_sigma_clip(img):
     bg_pixels = sample[mask]
     if len(bg_pixels) > 0:
         bg_mean = float(np.mean(bg_pixels))
-        bg_median = float(np.median(bg_pixels))
+        bg_median = float(_fast_median_1d(bg_pixels))
         bg_noise = float(np.std(bg_pixels))
     else:
         bg_mean = mean_val
@@ -222,7 +235,7 @@ def find_star_peaks(img, bg_median, sigma_mad, sigma_thresh=10.0, max_stars=500,
         if ry0 < 0 or ry1 > h or rx0 < 0 or rx1 > w:
             continue
         patch = img[ry0:ry1, rx0:rx1]
-        ring_median = float(np.median(patch[annulus_mask]))
+        ring_median = float(_fast_median_1d(patch[annulus_mask]))
         if val <= 0:
             continue
         sharpness = (val - ring_median) / val
@@ -287,14 +300,14 @@ def measure_star_roundness(img, star_coords, win_radius=8):
             stamp = img[max(y0, 0):min(y1, h), max(x0, 0):min(x1, w)].astype(np.float64)
             edge = np.concatenate([stamp[0, :], stamp[-1, :],
                                    stamp[1:-1, 0], stamp[1:-1, -1]])
-            bg = float(np.median(edge))
+            bg = float(_fast_median_1d(edge))
             stamp = np.maximum(stamp - bg, 0.0)
             total = stamp.sum()
             if total == 0:
                 results.append({'y': cy, 'x': cx, 'roundness': 0.0,
                                 'fwhm_major': 0.0, 'fwhm_minor': 0.0,
                                 'angle_deg': 0.0})
-                continue
+
             Y, X = np.indices(stamp.shape, dtype=np.float64)
             y_c = (Y * stamp).sum() / total
             x_c = (X * stamp).sum() / total
@@ -302,7 +315,7 @@ def measure_star_roundness(img, star_coords, win_radius=8):
             Xc = X - x_c
         else:
             stamp = img[y0:y1, x0:x1].astype(np.float64)
-            bg = float(np.median(stamp[edge_mask]))
+            bg = float(_fast_median_1d(stamp[edge_mask]))
             stamp = np.maximum(stamp - bg, 0.0)
             total = stamp.sum()
             if total == 0:
@@ -647,28 +660,183 @@ def analyze_fits(filepath, workers=None, dtype=np.float32, quiet=False):
     return results
 
 
+def analyze_directory(directory, workers=None, reject_pct=None):
+    """
+    Analyzes every FITS file in ``directory`` (sorted) and prints a combined
+    summary table. Optionally flags the worst ``reject_pct`` of images by a
+    composite quality score (SNR, star count, roundness, FWHM) so you can
+    exclude them from a stack. Returns a list of (filepath, results) tuples,
+    or None on hard failure.
+    """
+    directory = os.path.expanduser(directory)
+    if not os.path.isdir(directory):
+        print(f"Error: Not a directory: {directory}", file=sys.stderr)
+        return None
+
+    fits_exts = ('.fits', '.fit', '.fts', '.fz')
+    files = sorted(
+        os.path.join(directory, f)
+        for f in os.listdir(directory)
+        if f.lower().endswith(fits_exts)
+    )
+    if not files:
+        print(f"Error: No FITS files found in {directory}", file=sys.stderr)
+        return None
+
+    print(f"Found {len(files)} FITS file(s) in {directory}")
+    all_results = []
+    for fpath in files:
+        print(f"\n{'='*70}\nProcessing: {fpath}\n{'='*70}")
+        res = analyze_fits(fpath, workers=workers, quiet=False)
+        if res is not None:
+            all_results.append((fpath, res))
+
+    if not all_results:
+        print("No FITS files could be analyzed.")
+        return None
+
+    # Combined summary table
+    print("\n" + "=" * 70)
+    print("                         DIRECTORY SUMMARY")
+    print("=" * 70)
+
+    rows = []
+    snrs, stars, rounds, fwhms = [], [], [], []
+    max_name_len = 0
+    max_type_len = 0
+    for fpath, res in all_results:
+        s = res[0].get('total_summary', {}) if res else {}
+        name = os.path.basename(fpath)
+        max_name_len = max(max_name_len, len(name))
+        snr = float(s.get('snr_bg_db', s.get('lum_snr_bg_db', 0)) or 0)
+        nstars = int(s.get('star_count', 0) or 0)
+        rnd = float(s.get('star_roundness_avg', 0) or 0)
+        fwhm = float(s.get('star_fwhm_avg', 0) or 0)
+        ftype = str(s.get('type', '?'))
+        max_type_len = max(max_type_len, len(ftype))
+        snrs.append(snr); stars.append(nstars); rounds.append(rnd); fwhms.append(fwhm)
+        rows.append({
+            'name': name,
+            'type': ftype,
+            'snr': snr,
+            'stars': nstars,
+            'roundness': rnd,
+            'fwhm': fwhm,
+            'quality': 0.0,
+        })
+
+    # Composite quality score: normalize each metric to 0-1, average.
+    # Higher quality = better for stacking. FWHM inverted (lower is better).
+    max_snr = max(snrs) if snrs else 0.0
+    max_stars = max(stars) if stars else 0.0
+    max_fwhm = max(fwhms) if fwhms else 0.0
+    for row in rows:
+        q_snr = row['snr'] / max_snr if max_snr > 0 else 0.0
+        q_stars = row['stars'] / max_stars if max_stars > 0 else 0.0
+        q_round = row['roundness']
+        q_fwhm = (1.0 - row['fwhm'] / max_fwhm) if max_fwhm > 0 else 0.0
+        row['quality'] = float(np.clip((q_snr + q_stars + q_round + q_fwhm) / 4.0, 0.0, 1.0))
+
+    # Build format strings with dynamic file/type column widths (no truncation).
+    fwidth = max(max_name_len, len("AVERAGE"))
+    twidth = max(max_type_len, len("Type"))
+    f_row = lambda row: f"{row['name']:<{fwidth}} {row['type']:<{twidth}} {row['snr']:>9.2f} {row['stars']:>6} {row['roundness']:>10.3f} {row['fwhm']:>8.2f} {row['quality']:>8.3f}"
+    f_avg = f"{'AVERAGE':<{fwidth}} {'':<{twidth}} {float(np.mean(snrs)):>9.2f} {float(np.mean(stars)):>6.1f} {float(np.mean(rounds)):>10.3f} {float(np.mean(fwhms)):>8.2f} {float(np.mean([r['quality'] for r in rows])):>8.3f}"
+    header = f"{'File':<{fwidth}} {'Type':<{twidth}} {'SNR(dB)':>9} {'Stars':>6} {'Roundness':>10} {'FWHM':>8} {'Quality':>8}"
+
+    print("\n" + "=" * len(header))
+    print("                         DIRECTORY SUMMARY")
+    print("=" * len(header))
+    print(header)
+    print("-" * len(header))
+
+    for row in rows:
+        print(f_row(row))
+
+    if snrs:
+        print("-" * len(header))
+        print(f_avg)
+
+    rows.sort(key=lambda r: r['quality'])
+
+    if reject_pct is not None and rows:
+        n_reject = max(1, int(np.ceil(len(rows) * reject_pct / 100.0)))
+        n_reject = min(n_reject, len(rows))
+        worst = rows[:n_reject]
+        print("-" * len(header))
+        print(f"                         WORST {reject_pct:.0f}% ({n_reject} file(s)) - consider excluding from stack")
+        print(header)
+        print("-" * len(header))
+        for row in worst:
+            print(f_row(row))
+        print("=" * len(header))
+
+    return all_results
+
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
-        print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file> [workers]")
+        print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%]")
         sys.exit(0 if len(sys.argv) > 1 and sys.argv[1] in ('-h', '--help') else 1)
 
-    filepath = sys.argv[1]
+    target = None
     workers = os.cpu_count() or 4
-    for i in range(2, len(sys.argv)):
+    reject_pct = None
+    i = 1
+    while i < len(sys.argv):
         arg = sys.argv[i]
-        if arg.isdigit():
-            workers = int(arg)
-        elif arg in ('-j', '--workers', '--threads') and i + 1 < len(sys.argv):
+        if arg in ('-j', '--workers', '--threads') and i + 1 < len(sys.argv):
             try:
                 workers = int(sys.argv[i + 1])
             except ValueError:
                 pass
+            i += 2
+        elif arg in ('--reject',) and i + 1 < len(sys.argv):
+            raw = sys.argv[i + 1]
+            try:
+                if raw.endswith('%'):
+                    reject_pct = float(raw[:-1])
+                else:
+                    reject_pct = float(raw)
+                if not 0 < reject_pct <= 100:
+                    print("Error: --reject must be between 1 and 100", file=sys.stderr)
+                    sys.exit(1)
+            except ValueError:
+                pass
+            i += 2
+        elif arg.startswith('--reject='):
+            try:
+                raw = arg.split('=', 1)[1]
+                reject_pct = float(raw.rstrip('%'))
+                if not 0 < reject_pct <= 100:
+                    print("Error: --reject must be between 1 and 100", file=sys.stderr)
+                    sys.exit(1)
+            except ValueError:
+                pass
+            i += 1
+        elif arg.isdigit():
+            workers = int(arg)
+            i += 1
+        else:
+            target = arg
+            i += 1
+
+    if target is None:
+        print("Error: No FITS file or directory specified", file=sys.stderr)
+        sys.exit(1)
 
     t_start = time.perf_counter()
-    res = analyze_fits(filepath, workers=workers)
+
+    if os.path.isdir(target):
+        all_results = analyze_directory(target, workers=workers, reject_pct=reject_pct)
+        ok = all_results is not None and len(all_results) > 0
+    else:
+        res = analyze_fits(target, workers=workers)
+        ok = res is not None
+
     t_total = time.perf_counter() - t_start
 
-    if res is None:
+    if not ok:
         sys.exit(1)
 
     print(f"\n[Completed in {t_total:.2f}s using {workers} CPU cores]")
