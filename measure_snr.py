@@ -708,7 +708,7 @@ def analyze_directory(directory, workers=None, reject_pct=None):
         s = res[0].get('total_summary', {}) if res else {}
         name = os.path.basename(fpath)
         max_name_len = max(max_name_len, len(name))
-        snr = float(s.get('snr_bg_db', s.get('lum_snr_bg_db', 0)) or 0)
+        snr = float(s.get('snr_pixinsight_db', s.get('lum_snr_pi_db', 0)) or 0)
         rnd = float(s.get('star_roundness_avg', 0) or 0)
         fwhm = float(s.get('star_fwhm_avg', 0) or 0)
         ftype = str(s.get('type', '?'))
@@ -738,7 +738,7 @@ def analyze_directory(directory, workers=None, reject_pct=None):
     twidth = max(max_type_len, len("Type"))
     f_row = lambda row: f"{row['name']:<{fwidth}} {row['type']:<{twidth}} {row['snr']:>9.2f} {row['roundness']:>10.3f} {row['fwhm']:>8.2f} {row['quality']:>8.3f}"
     f_avg = f"{'AVERAGE':<{fwidth}} {'':<{twidth}} {float(np.mean(snrs)):>9.2f} {float(np.mean(rounds)):>10.3f} {float(np.mean(fwhms)):>8.2f} {float(np.mean([r['quality'] for r in rows])):>8.3f}"
-    header = f"{'File':<{fwidth}} {'Type':<{twidth}} {'SNR(dB)':>9} {'Roundness':>10} {'FWHM':>8} {'Quality':>8}"
+    header = f"{'File':<{fwidth}} {'Type':<{twidth}} {'PI SNR(dB)':>10} {'Roundness':>10} {'FWHM':>8} {'Quality':>8}"
 
     print("\n" + "=" * len(header))
     print("                         DIRECTORY SUMMARY")
