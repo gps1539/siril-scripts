@@ -427,7 +427,6 @@ def analyze_channel(ch_name, img, header_info=None, workers=4, star_peaks=None):
     out.append(f"Background SNR (Background / Noise): {snr_bg_hf:.2f} ({snr_db:.2f} dB)")
     out.append(f"Total Image Signal SNR (Net Signal / Noise): {snr_signal:.2f} ({snr_signal_db:.2f} dB)")
     out.append(f"PixInsight Relative SNR (AvgDev / Noise): {snr_pixinsight:.2f} ({snr_pixinsight_db:.2f} dB)")
-    out.append(f"Stars Detected: {num_stars}")
     out.append(f"Star Roundness (1.0=round): avg={avg_roundness:.3f}  median={med_roundness:.3f}  min={min_roundness:.3f}  max={max_roundness:.3f}")
     out.append(f"Star FWHM (px):             avg={avg_fwhm:.2f}  median={med_fwhm:.2f}  min={min_fwhm:.2f}  max={max_fwhm:.2f}")
 
@@ -637,7 +636,6 @@ def analyze_fits(filepath, workers=None, dtype=np.float32, quiet=False):
         all_r = [s['roundness'] for s in all_details]
         all_fwhm_maj = [s['fwhm_major'] for s in all_details]
         all_fwhm_min = [s['fwhm_minor'] for s in all_details]
-        total_summary.append(f"Stars Detected:                 {avg_stars}")
         total_summary.append(f"Star Roundness (1.0=round):     avg={np.mean(all_r):.3f}  median={np.median(all_r):.3f}  min={np.min(all_r):.3f}  max={np.max(all_r):.3f}")
         total_summary.append(f"Star FWHM (px):                 avg={np.mean(all_fwhm_maj):.2f}  median={np.median(all_fwhm_maj):.2f}  min={np.min(all_fwhm_min):.2f}  max={np.max(all_fwhm_maj):.2f}")
         summary_data['star_count'] = avg_stars
@@ -646,10 +644,11 @@ def analyze_fits(filepath, workers=None, dtype=np.float32, quiet=False):
         summary_data['star_fwhm_avg'] = float(np.mean(all_fwhm_maj))
         summary_data['star_fwhm_median'] = float(np.median(all_fwhm_maj))
     else:
-        total_summary.append(f"Stars Detected:                 0")
+        pass
 
     total_summary.append("=" * 70)
-    out_lines.append("\n" + "\n".join(total_summary))
+    summary_text = "\n" + "\n".join(total_summary)
+    out_lines.append(summary_text)
 
     for r in results:
         r['total_summary'] = summary_data
@@ -660,7 +659,7 @@ def analyze_fits(filepath, workers=None, dtype=np.float32, quiet=False):
     return results
 
 
-def analyze_directory(directory, workers=None, reject_pct=None):
+def analyze_directory(directory, workers=None, reject_pct=None, recursive=False, show_summary=True, summary_sink=None):
     """
     Analyzes every FITS file in ``directory`` (sorted) and prints a combined
     summary table. Optionally flags the worst ``reject_pct`` of images by a
@@ -674,6 +673,26 @@ def analyze_directory(directory, workers=None, reject_pct=None):
         return None
 
     fits_exts = ('.fits', '.fit', '.fts', '.fz')
+
+    if recursive:
+        target_dirs = sorted(
+            root for root, _, files in os.walk(directory)
+            if any(f.lower().endswith(fits_exts) for f in files)
+        )
+        sink = []
+        all_results = []
+        for d in target_dirs:
+            print(f"\n{'#' * 70}\nDirectory: {d}\n{'#' * 70}")
+            res = analyze_directory(d, workers=workers, reject_pct=reject_pct, recursive=False,
+                                    show_summary=False, summary_sink=sink)
+            if res:
+                all_results.extend(res)
+        # Print all directory summaries at the end, named by directory
+        for d, text in sink:
+            print(f"\n{'#' * 70}\nDirectory Summary: {d}\n{'#' * 70}")
+            print(text)
+        return all_results if all_results else None
+
     files = sorted(
         os.path.join(directory, f)
         for f in os.listdir(directory)
@@ -696,10 +715,6 @@ def analyze_directory(directory, workers=None, reject_pct=None):
         return None
 
     # Combined summary table
-    print("\n" + "=" * 70)
-    print("                         DIRECTORY SUMMARY")
-    print("=" * 70)
-
     rows = []
     snrs, rounds, fwhms = [], [], []
     max_name_len = 0
@@ -740,18 +755,16 @@ def analyze_directory(directory, workers=None, reject_pct=None):
     f_avg = f"{'AVERAGE':<{fwidth}} {'':<{twidth}} {float(np.mean(snrs)):>9.2f} {float(np.mean(rounds)):>10.3f} {float(np.mean(fwhms)):>8.2f} {float(np.mean([r['quality'] for r in rows])):>8.3f}"
     header = f"{'File':<{fwidth}} {'Type':<{twidth}} {'PI SNR(dB)':>10} {'Roundness':>10} {'FWHM':>8} {'Quality':>8}"
 
-    print("\n" + "=" * len(header))
-    print("                         DIRECTORY SUMMARY")
-    print("=" * len(header))
-    print(header)
-    print("-" * len(header))
+    table_lines = []
+    table_lines.append(header)
+    table_lines.append("-" * len(header))
 
     for row in rows:
-        print(f_row(row))
+        table_lines.append(f_row(row))
 
     if snrs:
-        print("-" * len(header))
-        print(f_avg)
+        table_lines.append("-" * len(header))
+        table_lines.append(f_avg)
 
     rows.sort(key=lambda r: r['quality'])
 
@@ -759,25 +772,33 @@ def analyze_directory(directory, workers=None, reject_pct=None):
         n_reject = max(1, int(np.ceil(len(rows) * reject_pct / 100.0)))
         n_reject = min(n_reject, len(rows))
         worst = rows[:n_reject]
-        print("-" * len(header))
-        print(f"                         WORST {reject_pct:.0f}% ({n_reject} file(s)) - consider excluding from stack")
-        print(header)
-        print("-" * len(header))
+        table_lines.append("-" * len(header))
+        table_lines.append(f"                         WORST {reject_pct:.0f}% ({n_reject} file(s)) - consider excluding from stack")
+        table_lines.append(header)
+        table_lines.append("-" * len(header))
         for row in worst:
-            print(f_row(row))
-        print("=" * len(header))
+            table_lines.append(f_row(row))
+        table_lines.append("=" * len(header))
+
+    table_text = "\n".join(table_lines)
+
+    if summary_sink is not None:
+        summary_sink.append((directory, table_text))
+    else:
+        print(table_text)
 
     return all_results
 
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
-        print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%]")
+        print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%] [-r|--recursive]")
         sys.exit(0 if len(sys.argv) > 1 and sys.argv[1] in ('-h', '--help') else 1)
 
     target = None
     workers = os.cpu_count() or 4
     reject_pct = None
+    recursive = False
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
@@ -787,6 +808,9 @@ def main():
             except ValueError:
                 pass
             i += 2
+        elif arg in ('-r', '--recursive'):
+            recursive = True
+            i += 1
         elif arg in ('--reject',) and i + 1 < len(sys.argv):
             raw = sys.argv[i + 1]
             try:
@@ -824,7 +848,7 @@ def main():
     t_start = time.perf_counter()
 
     if os.path.isdir(target):
-        all_results = analyze_directory(target, workers=workers, reject_pct=reject_pct)
+        all_results = analyze_directory(target, workers=workers, reject_pct=reject_pct, recursive=recursive)
         ok = all_results is not None and len(all_results) > 0
     else:
         res = analyze_fits(target, workers=workers)
