@@ -14,10 +14,17 @@ SPDX-License-Identifier: GPL-3.0-or-later
 """
 
 import os
+import shutil
 import sys
+import io
 import time
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
+
+try:
+    import sirilpy as s
+except ImportError:
+    s = None
 
 
 def format_val(val):
@@ -377,7 +384,6 @@ def analyze_channel(ch_name, img, header_info=None, workers=4, star_peaks=None):
     bg_mean = bg_res['bg_mean']
 
     # Signal to Noise Metrics
-    snr_bg_mad = bg_median / sigma_mad if sigma_mad > 0 else 0
     snr_bg_hf = bg_median / hf_noise if hf_noise > 0 else 0
 
     # Net astronomical signal and dispersion on subsample to eliminate 100MB allocations
@@ -480,8 +486,6 @@ def analyze_fits(filepath, workers=None, dtype=np.float32, quiet=False):
     out_lines = []
     out_lines.append(f"Opening {filepath}...")
     with fits.open(filepath, memmap=False) as hdul:
-        # Capture HDU info string cleanly
-        import io
         buf = io.StringIO()
         hdul.info(output=buf)
         out_lines.append(buf.getvalue().rstrip())
@@ -643,8 +647,6 @@ def analyze_fits(filepath, workers=None, dtype=np.float32, quiet=False):
         summary_data['star_roundness_median'] = float(np.median(all_r))
         summary_data['star_fwhm_avg'] = float(np.mean(all_fwhm_maj))
         summary_data['star_fwhm_median'] = float(np.median(all_fwhm_maj))
-    else:
-        pass
 
     total_summary.append("=" * 70)
     summary_text = "\n" + "\n".join(total_summary)
@@ -659,7 +661,7 @@ def analyze_fits(filepath, workers=None, dtype=np.float32, quiet=False):
     return results
 
 
-def analyze_directory(directory, workers=None, reject_pct=None, recursive=False, show_summary=True, summary_sink=None):
+def analyze_directory(directory, workers=None, reject_pct=None, recursive=False, summary_sink=None):
     """
     Analyzes every FITS file in ``directory`` (sorted) and prints a combined
     summary table. Optionally flags the worst ``reject_pct`` of images by a
@@ -684,7 +686,7 @@ def analyze_directory(directory, workers=None, reject_pct=None, recursive=False,
         for d in target_dirs:
             print(f"\n{'#' * 70}\nDirectory: {d}\n{'#' * 70}")
             res = analyze_directory(d, workers=workers, reject_pct=reject_pct, recursive=False,
-                                    show_summary=False, summary_sink=sink)
+                                    summary_sink=sink)
             if res:
                 all_results.extend(res)
         # Print all directory summaries at the end, named by directory
@@ -731,6 +733,7 @@ def analyze_directory(directory, workers=None, reject_pct=None, recursive=False,
         snrs.append(snr); rounds.append(rnd); fwhms.append(fwhm)
         rows.append({
             'name': name,
+            'path': fpath,
             'type': ftype,
             'snr': snr,
             'roundness': rnd,
@@ -769,16 +772,29 @@ def analyze_directory(directory, workers=None, reject_pct=None, recursive=False,
     rows.sort(key=lambda r: r['quality'])
 
     if reject_pct is not None and rows:
-        n_reject = max(1, int(np.ceil(len(rows) * reject_pct / 100.0)))
+        n_reject = int(len(rows) * reject_pct / 100.0)
+        if n_reject < 1:
+            n_reject = 0
         n_reject = min(n_reject, len(rows))
         worst = rows[:n_reject]
-        table_lines.append("-" * len(header))
-        table_lines.append(f"                         WORST {reject_pct:.0f}% ({n_reject} file(s)) - consider excluding from stack")
-        table_lines.append(header)
-        table_lines.append("-" * len(header))
-        for row in worst:
-            table_lines.append(f_row(row))
-        table_lines.append("=" * len(header))
+        if n_reject > 0:
+            table_lines.append("-" * len(header))
+            table_lines.append(f"                         WORST {reject_pct:.0f}% ({n_reject} file(s)) - excluded")
+            table_lines.append(header)
+            table_lines.append("-" * len(header))
+            for row in worst:
+                table_lines.append(f_row(row))
+            table_lines.append("=" * len(header))
+
+            # Move rejected images into a sibling <directory>_rejected folder
+            rejected_dir = directory + "_rejected"
+            os.makedirs(rejected_dir, exist_ok=True)
+            for row in worst:
+                src = row['path']
+                dst = os.path.join(rejected_dir, os.path.basename(src))
+                if os.path.exists(src):
+                    shutil.move(src, dst)
+                    table_lines.append(f"Moved to {rejected_dir}: {os.path.basename(src)}")
 
     table_text = "\n".join(table_lines)
 
@@ -790,24 +806,83 @@ def analyze_directory(directory, workers=None, reject_pct=None, recursive=False,
     return all_results
 
 
-def main():
-    if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
-        print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%] [-r|--recursive]")
-        sys.exit(0 if len(sys.argv) > 1 and sys.argv[1] in ('-h', '--help') else 1)
+def _detect_siril_target(s, siril=None):
+    """Find a target image or lights dir from a connected Siril instance."""
+    # 1. If an image is loaded in Siril, use ONLY that as the target
+    if siril is not None:
+        fn = getattr(siril, "get_image_filename", None)
+        if fn:
+            try:
+                cur = fn()
+                if isinstance(cur, str) and cur.strip() and not cur.endswith(".sock"):
+                    return cur
+            except Exception:
+                pass
 
+    # 2. No image loaded: use the Siril working directory -> lights subdir
+    wdir = None
+    if siril is not None:
+        for meth in ("get_siril_wd", "get_working_directory", "working_directory", "get_workdir"):
+            fn = getattr(siril, meth, None)
+            if fn:
+                try:
+                    wdir = fn()
+                    if isinstance(wdir, str):
+                        break
+                except Exception:
+                    pass
+    if wdir is None:
+        for meth in ("get_siril_wd", "get_working_directory", "working_directory", "get_workdir"):
+            fn = getattr(s, meth, None)
+            if fn:
+                try:
+                    wdir = fn()
+                    if isinstance(wdir, str):
+                        break
+                except Exception:
+                    pass
+
+    if isinstance(wdir, str):
+        lights = os.path.join(wdir, "lights")
+        if os.path.isdir(lights):
+            return lights
+
+    return None
+
+
+def main():
+    global s
     target = None
     workers = os.cpu_count() or 4
     reject_pct = None
     recursive = False
+
+    # Retry sirilpy import in case the environment sets it up after module load
+    if s is None:
+        try:
+            import sirilpy as _s
+            s = _s
+        except ImportError:
+            pass
+
+    # Parse options from sys.argv regardless of sirilpy availability.
+    # When sirilpy is available, --reject/--recursive/--workers still work
+    # but a target is not required (Siril provides it).
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
-        if arg in ('-j', '--workers', '--threads') and i + 1 < len(sys.argv):
+        if arg in ('-h', '--help'):
+            print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%] [-r|--recursive] [-j N]")
+            sys.exit(0)
+        elif arg in ('-j', '--workers', '--threads') and i + 1 < len(sys.argv):
             try:
                 workers = int(sys.argv[i + 1])
             except ValueError:
                 pass
             i += 2
+        elif arg.isdigit():
+            workers = int(arg)
+            i += 1
         elif arg in ('-r', '--recursive'):
             recursive = True
             i += 1
@@ -834,16 +909,28 @@ def main():
             except ValueError:
                 pass
             i += 1
-        elif arg.isdigit():
-            workers = int(arg)
-            i += 1
         else:
             target = arg
             i += 1
 
-    if target is None:
-        print("Error: No FITS file or directory specified", file=sys.stderr)
-        sys.exit(1)
+    if s is not None:
+        # sirilpy available: use Siril, do not require a target argument
+        if target is None:
+            try:
+                siril = s.SirilInterface()
+                siril.connect()
+                target = _detect_siril_target(s, siril)
+            except Exception as e:
+                print(f"Error: could not connect to Siril: {e}", file=sys.stderr)
+                sys.exit(1)
+        if target is None:
+            print("Error: No FITS file or directory specified", file=sys.stderr)
+            sys.exit(1)
+    else:
+        # No sirilpy: a target is required
+        if target is None:
+            print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%] [-r|--recursive] [-j N]")
+            sys.exit(1)
 
     t_start = time.perf_counter()
 
