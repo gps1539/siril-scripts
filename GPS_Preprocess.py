@@ -134,12 +134,8 @@ def bkg_extract(process_dir):
 		siril.cmd(f"seqsubsky pp_light 1 -samples=10")
 
 def measure(workdir):
-	if len(args.measure_snr) >= 1:
-		reject = (f"--reject {args.measure_snr}")
-	else:
-		reject = None
 	try:
-		siril.cmd(f"pyscript measure_snr.py {reject}")
+		siril.cmd(f"pyscript measure_snr.py --reject {args.measure_snr[0]}")
 	except:
 		print("measure_snr.py script is not available, please add it via get scripts")
 		sys.exit(1)
@@ -293,6 +289,15 @@ def run_gui():
 
 			form_layout.addRow(filter_group)
 
+			self.measure_cb = QCheckBox("Measure subs, provide rejection %")
+			self.measure_input = QLineEdit("0")
+			self.measure_input.setToolTip("Rejected subs are moved to lights_rejected")
+			self.measure_input.setEnabled(False)
+			self.measure_cb.toggled.connect(self.measure_input.setEnabled)
+			measure_layout = QHBoxLayout()
+			measure_layout.addWidget(self.measure_input)
+			form_layout.addRow(self.measure_cb, measure_layout)
+
 			self.platesolve_cb = QCheckBox("Platesolve, optionally provide focal lenght")
 			self.platesolve_input = QLineEdit()
 			self.platesolve_input.setToolTip("Override value in fits header")
@@ -335,6 +340,7 @@ def run_gui():
 				"feather": self.feather_input.text(),
 				"drizzle": self.drizzle_input.text() if self.drizzle.isChecked() else None,
 				"bkg_extract": self.bkg_extract_cb.isChecked(),
+				"measure": self.measure_input.text() if self.measure_cb.isChecked() and self.measure_input.text() else self.measure_cb.isChecked(),
 				"platesolve": self.platesolve_input.text() if self.platesolve_cb.isChecked() and self.platesolve_input.text() else self.platesolve_cb.isChecked(),
 				"clean": self.clean_cb.isChecked(),
 				"no_calibration": self.no_calibration_cb.isChecked(),
@@ -405,6 +411,10 @@ def run_gui():
 			cli_args.extend(["-z", values["drizzle"]])
 		if values["bkg_extract"]:
 			cli_args.append("-bg")
+		if values["measure"]:
+			cli_args.append("-ms")
+			if isinstance(values["measure"], str):
+				cli_args.append(values["measure"])
 		if values["platesolve"]:
 			cli_args.append("-ps")
 			if isinstance(values["platesolve"], str):
@@ -439,7 +449,7 @@ def main_logic(argv):
 	parser.add_argument("-d", "--workdir", nargs='+', help="set working directory")
 	parser.add_argument("-f", "--feather", nargs='+', help="set feathering amount in px")
 	parser.add_argument("-m","--multi_session", nargs='+', help="Calibrates multiple sessions, provide working directory for each session")
-	parser.add_argument("-ms", "--measure_snr", nargs='?', const=True, help="measure quality of subs, optionally provide reject %%")
+	parser.add_argument("-ms", "--measure_snr", nargs='+', help="measure quality of subs, provide reject %%")
 	parser.add_argument("-nc", "--no_calibration", help="do not calibrate", action="store_true")
 	parser.add_argument("-ps", "--platesolve", nargs='?', const=True, help="platesolve, optionally provide focal lenght")
 	parser.add_argument("-r", "--round", nargs='+',	help="round filter settings, XX%% or X")
