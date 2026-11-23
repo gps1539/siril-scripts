@@ -42,7 +42,7 @@ import re
 import shutil
 import shlex
 
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 	
 # PyQt6 for GUI
 try:
@@ -133,6 +133,17 @@ def bkg_extract(process_dir):
 		siril.cmd(f"cd {process_dir}")
 		siril.cmd(f"seqsubsky pp_light 1 -samples=10")
 
+def measure(workdir):
+	if len(args.measure_snr) >= 1:
+		reject = (f"--reject {args.measure_snr}")
+	else:
+		reject = None
+	try:
+		siril.cmd(f"pyscript measure_snr.py {reject}")
+	except:
+		print("measure_snr.py script is not available, please add it via get scripts")
+		sys.exit(1)
+
 def platesolve(process_dir):
 	if args.bkg:
 		if os.path.exists(os.path.join(workdir, 'process/r_bkg_pp_light_.seq')):
@@ -144,7 +155,6 @@ def platesolve(process_dir):
 			return
 	siril.cmd("cd " + process_dir)
 	if args.platesolve == True :
-#		focal = " "
 		siril.cmd("load pp_light_00001")
 		focal = (f"-focal={int(siril.get_image_fits_header(return_as='dict')['FOCALLEN'])}")
 	else:
@@ -428,7 +438,8 @@ def main_logic(argv):
 	parser.add_argument("-c", "--clean", help="clean previous process directory", action="store_true")
 	parser.add_argument("-d", "--workdir", nargs='+', help="set working directory")
 	parser.add_argument("-f", "--feather", nargs='+', help="set feathering amount in px")
-	parser.add_argument("-m","--multi_session", nargs='+', help="Calibrates multiple sessions, provide working directory for each session")	
+	parser.add_argument("-m","--multi_session", nargs='+', help="Calibrates multiple sessions, provide working directory for each session")
+	parser.add_argument("-ms", "--measure_snr", nargs='?', const=True, help="measure quality of subs, optionally provide reject %%")
 	parser.add_argument("-nc", "--no_calibration", help="do not calibrate", action="store_true")
 	parser.add_argument("-ps", "--platesolve", nargs='?', const=True, help="platesolve, optionally provide focal lenght")
 	parser.add_argument("-r", "--round", nargs='+',	help="round filter settings, XX%% or X")
@@ -475,6 +486,9 @@ def main_logic(argv):
 
 		if args.clean:
 			clean()
+
+		if args.measure_snr:
+			measure(workdir)
 
 		if args.no_calibration:
 			light_nc(os.path.join(workdir, 'lights'), process_dir)
