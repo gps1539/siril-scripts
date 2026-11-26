@@ -18,8 +18,11 @@ import shutil
 import sys
 import io
 import time
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
+
+VERSION = "0.0.9"
 
 try:
     import sirilpy as s
@@ -661,7 +664,168 @@ def analyze_fits(filepath, workers=None, dtype=np.float32, quiet=False):
     return results
 
 
-def analyze_directory(directory, workers=None, reject_pct=None, recursive=False, summary_sink=None):
+def _open_with_viewer(path):
+    """Best-effort open of a file with the OS default viewer. Returns True on success."""
+    candidates = []
+    if sys.platform.startswith('win'):
+        candidates.append(['cmd', '/c', 'start', '', path])
+    elif sys.platform == 'darwin':
+        candidates.append(['open', path])
+    else:
+        candidates.extend([
+            ['xdg-open', path],
+            ['gio', 'open', path],
+            ['/usr/bin/xdg-open', path],
+        ])
+    for cmd in candidates:
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _write_svg_summary(rows, output_path):
+    """Dependency-free SVG line chart of SNR, Roundness, FWHM and Quality.
+
+    Used as a fallback when matplotlib is unavailable (e.g. inside Siril's
+    bundled Python). Produces a valid SVG viewable in any browser or image
+    viewer. Returns the path on success, or None on failure.
+    """
+    import html
+
+    n = len(rows)
+    names = [r['name'] for r in rows]
+    series = [
+        ("PixInsight Relative SNR (dB)", [r['snr'] for r in rows], "#4aa3ff"),
+        ("Star Roundness (1.0 = round)", [r['roundness'] for r in rows], "#5fd35f"),
+        ("Star FWHM (px, lower is better)", [r['fwhm'] for r in rows], "#ff6b6b"),
+        ("Quality (0-1, higher is better)", [r.get('quality', 0.0) for r in rows], "#c58bff"),
+    ]
+
+    panel_h = 200
+    top = 50
+    bottom = 110
+    height = top + panel_h * len(series) + bottom
+    left = 80
+    right_margin = 30
+    # Gap between points shrinks as the number of points grows (spacing ∝ 1/n),
+    # with a floor so dense charts stay legible.
+    spacing = max(18.0, 720.0 / max(n, 1))
+    width = max(640, left + right_margin + spacing * max(n - 1, 0))
+    right = width - right_margin
+
+    def esc(t):
+        return html.escape(str(t))
+
+    svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+           f'font-family="sans-serif" font-size="11">',
+           f'<rect width="100%" height="100%" fill="#1e1e1e"/>',
+           f'<text x="{width/2:.0f}" y="28" text-anchor="middle" font-size="16" '
+           f'font-weight="bold" fill="#f0f0f0">Per-Image Quality Metrics</text>']
+
+    for idx, (label, vals, color) in enumerate(series):
+        y0 = top + idx * panel_h
+        ptop, pbot = y0 + 24, y0 + panel_h - 24
+        svg.append(f'<text x="10" y="{y0 + 14}" font-size="11" fill="{color}" '
+                   f'font-weight="bold">{esc(label)}</text>')
+        # Plot frame
+        svg.append(f'<rect x="{left}" y="{ptop}" width="{right-left}" height="{pbot-ptop}" '
+                   f'fill="none" stroke="#444444"/>')
+        if n == 0:
+            continue
+        vmin, vmax = min(vals), max(vals)
+        if vmax - vmin < 1e-9:
+            vmin -= 0.5
+            vmax += 0.5
+        pad = (vmax - vmin) * 0.08
+        vmin -= pad
+        vmax += pad
+
+        def px(i):
+            return left + (right - left) * (0.5 if n == 1 else i / (n - 1))
+
+        def py(v):
+            return pbot - (pbot - ptop) * (v - vmin) / (vmax - vmin)
+
+        # Axis value labels (max top, min bottom)
+        svg.append(f'<text x="{left-6}" y="{ptop+4}" text-anchor="end" '
+                   f'font-size="9" fill="#aaaaaa">{vmax:.3g}</text>')
+        svg.append(f'<text x="{left-6}" y="{pbot}" text-anchor="end" '
+                   f'font-size="9" fill="#aaaaaa">{vmin:.3g}</text>')
+
+        pts = " ".join(f"{px(i):.1f},{py(v):.1f}" for i, v in enumerate(vals))
+        svg.append(f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="1.6"/>')
+        for i, v in enumerate(vals):
+            svg.append(f'<circle cx="{px(i):.1f}" cy="{py(v):.1f}" r="3" fill="{color}"/>')
+
+        # File labels only under the bottom panel
+        if idx == len(series) - 1:
+            for i, nm in enumerate(names):
+                svg.append(f'<text x="{px(i):.1f}" y="{pbot + 14}" text-anchor="end" '
+                           f'font-size="9" fill="#dddddd" '
+                           f'transform="rotate(-45 {px(i):.1f} {pbot + 14})">{esc(nm)}</text>')
+
+    svg.append('</svg>')
+    try:
+        with open(output_path, 'w', encoding='utf-8') as fh:
+            fh.write("\n".join(svg))
+        return output_path
+    except Exception as e:
+        print(f"Warning: could not write SVG summary plot: {e}", file=sys.stderr)
+        return None
+
+
+def plot_directory_summary(rows, output_path=None, show=True):
+    """Plots SNR, Roundness, FWHM and Quality across multiple measured images.
+
+    Generates a dependency-free four-panel SVG chart (one panel per metric) with
+    one point per file, then opens it with the system viewer. Works inside Siril's
+    bundled Python without matplotlib.
+
+    Parameters
+    ----------
+    rows : list of dict
+        Rows as built by :func:`analyze_directory` (keys: ``name``, ``snr``,
+        ``roundness``, ``fwhm``, ``quality``).
+    output_path : str, optional
+        Destination path (extension optional). Defaults to
+        ``<directory>_summary`` next to the analyzed directory.
+    show : bool
+        Whether to open the chart with the system viewer.
+
+    Returns
+    -------
+    str or None
+        The written file path, or None if plotting was skipped/failed.
+    """
+    if not rows:
+        return None
+
+    if output_path is None:
+        if rows and rows[0].get('path'):
+            directory = os.path.dirname(rows[0]['path'])
+            base = os.path.join(directory, os.path.basename(directory.rstrip(os.sep)) + "_summary")
+        else:
+            base = "siril_summary"
+    else:
+        base = os.path.splitext(output_path)[0]
+    svg_path = base + ".svg"
+
+    saved = _write_svg_summary(rows, svg_path)
+    if saved:
+        print(f"\nSummary plot written to: {saved}")
+
+    if show and saved:
+        if not _open_with_viewer(saved):
+            print(f"Open the summary plot manually: {saved}", file=sys.stderr)
+
+    return saved
+
+
+def analyze_directory(directory, workers=None, reject_pct=None, recursive=False, summary_sink=None, plot=True):
     """
     Analyzes every FITS file in ``directory`` (sorted) and prints a combined
     summary table. Optionally flags the worst ``reject_pct`` of images by a
@@ -686,7 +850,7 @@ def analyze_directory(directory, workers=None, reject_pct=None, recursive=False,
         for d in target_dirs:
             print(f"\n{'#' * 70}\nDirectory: {d}\n{'#' * 70}")
             res = analyze_directory(d, workers=workers, reject_pct=reject_pct, recursive=False,
-                                    summary_sink=sink)
+                                    summary_sink=sink, plot=plot)
             if res:
                 all_results.extend(res)
         # Print all directory summaries at the end, named by directory
@@ -768,6 +932,9 @@ def analyze_directory(directory, workers=None, reject_pct=None, recursive=False,
     if snrs:
         table_lines.append("-" * len(header))
         table_lines.append(f_avg)
+
+    if plot and len(rows) > 1:
+        plot_directory_summary(rows)
 
     rows.sort(key=lambda r: r['quality'])
 
@@ -856,6 +1023,7 @@ def main():
     workers = os.cpu_count() or 4
     reject_pct = None
     recursive = False
+    plot = True
 
     # Retry sirilpy import in case the environment sets it up after module load
     if s is None:
@@ -872,7 +1040,7 @@ def main():
     while i < len(sys.argv):
         arg = sys.argv[i]
         if arg in ('-h', '--help'):
-            print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%] [-r|--recursive] [-j N]")
+            print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%] [-r|--recursive] [-j N] [--no-plot]")
             sys.exit(0)
         elif arg in ('-j', '--workers', '--threads') and i + 1 < len(sys.argv):
             try:
@@ -885,6 +1053,9 @@ def main():
             i += 1
         elif arg in ('-r', '--recursive'):
             recursive = True
+            i += 1
+        elif arg in ('--no-plot',):
+            plot = False
             i += 1
         elif arg in ('--reject',) and i + 1 < len(sys.argv):
             raw = sys.argv[i + 1]
@@ -929,13 +1100,13 @@ def main():
     else:
         # No sirilpy: a target is required
         if target is None:
-            print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%] [-r|--recursive] [-j N]")
+            print(f"Usage: {os.path.basename(sys.argv[0])} <fits_file_or_dir> [workers] [--reject X%] [-r|--recursive] [-j N] [--no-plot]")
             sys.exit(1)
 
     t_start = time.perf_counter()
 
     if os.path.isdir(target):
-        all_results = analyze_directory(target, workers=workers, reject_pct=reject_pct, recursive=recursive)
+        all_results = analyze_directory(target, workers=workers, reject_pct=reject_pct, recursive=recursive, plot=plot)
         ok = all_results is not None and len(all_results) > 0
     else:
         res = analyze_fits(target, workers=workers)
